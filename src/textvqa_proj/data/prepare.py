@@ -6,7 +6,7 @@ from typing import Any
 from textvqa_proj.config import Settings
 from textvqa_proj.data.dataset import load_huggingface_split, load_manifest, write_manifest
 from textvqa_proj.data.splits import stratified_subset
-from textvqa_proj.utils.io import ensure_dir, load_image, write_jsonl
+from textvqa_proj.utils.io import append_jsonl, ensure_dir, iter_jsonl, load_image
 
 
 def materialize_internal_dev_split(
@@ -77,9 +77,12 @@ def materialize_external_ocr_manifest(
             limit=limit,
         )
     ensure_dir(output_path.parent)
+    completed_ids = {record["sample_id"] for record in iter_jsonl(output_path)}
     engine = RapidOCR()
-    records: list[dict[str, Any]] = []
+    records_written = len(completed_ids)
     for sample in samples:
+        if sample.sample_id in completed_ids:
+            continue
         image = load_image(sample.image)
         result, _ = engine(np.asarray(image))
         tokens = [
@@ -87,18 +90,20 @@ def materialize_external_ocr_manifest(
             for entry in (result or [])
             if len(entry) >= 2 and str(entry[1]).strip()
         ]
-        records.append(
+        append_jsonl(
+            output_path,
             {
                 "sample_id": sample.sample_id,
                 "question_id": sample.question_id,
                 "external_ocr_tokens": tokens,
                 "metadata": {"engine": "rapidocr_onnxruntime", "split": split},
-            }
+            },
         )
-    write_jsonl(output_path, records)
+        records_written += 1
     return {
         "status": "completed",
         "split": split,
-        "count": len(records),
+        "count": records_written,
+        "resumed_count": len(completed_ids),
         "output_path": str(output_path),
     }
