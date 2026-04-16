@@ -1,0 +1,20 @@
+[experiment]
+name = "screening"
+run_name = "ocr-injected-internal-dev"
+split = "internal_dev"
+batch_size = 1
+resume = true
+match_type = "any"
+include_semantic_metrics = true
+
+[prompt]
+template = "ocr_injected"
+include_ocr = true
+normalize_ocr = false
+ocr_source = "dataset"
+
+[generation]
+max_new_tokens = 8
+temperature = 0.0
+top_p = 1.0
+do_sample = false

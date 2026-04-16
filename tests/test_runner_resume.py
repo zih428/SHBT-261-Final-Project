@@ -45,3 +45,6 @@ def test_runner_is_resumable(tmp_path: Path) -> None:
     )
     lines = predictions_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
+    assert (
+        tmp_path / "runs" / settings.experiment.name / "resume-check" / "breakdowns.json"
+    ).exists()

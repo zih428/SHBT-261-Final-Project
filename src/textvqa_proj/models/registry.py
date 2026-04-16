@@ -5,6 +5,7 @@ from textvqa_proj.models.blip2 import Blip2Adapter
 from textvqa_proj.models.fake import FakeAnsweringAdapter
 from textvqa_proj.models.internvl import InternVL25Adapter
 from textvqa_proj.models.llava import LlavaHFAdapter
+from textvqa_proj.models.ocr_lexical import OCRLexicalAdapter
 from textvqa_proj.models.qwen_vl import Qwen25VLAdapter
 
 MODEL_REGISTRY: dict[str, type[BaseModelAdapter]] = {
@@ -13,6 +14,7 @@ MODEL_REGISTRY: dict[str, type[BaseModelAdapter]] = {
     Blip2Adapter.adapter_name: Blip2Adapter,
     LlavaHFAdapter.adapter_name: LlavaHFAdapter,
     InternVL25Adapter.adapter_name: InternVL25Adapter,
+    OCRLexicalAdapter.adapter_name: OCRLexicalAdapter,
 }
 
 

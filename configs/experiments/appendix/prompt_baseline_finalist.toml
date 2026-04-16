@@ -1,0 +1,21 @@
+# Current default finalist prompt. Update this if screening promotes a different prompt as the winner.
+[experiment]
+name = "appendix-prompt-study"
+run_name = "baseline-finalist-validation"
+split = "validation"
+batch_size = 1
+resume = true
+match_type = "any"
+include_semantic_metrics = true
+
+[prompt]
+template = "ocr_injected_normalized"
+include_ocr = true
+normalize_ocr = true
+ocr_source = "dataset"
+
+[generation]
+max_new_tokens = 8
+temperature = 0.0
+top_p = 1.0
+do_sample = false

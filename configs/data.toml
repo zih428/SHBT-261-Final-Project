@@ -2,5 +2,9 @@
 hf_dataset_name = "lmms-lab/textvqa"
 hf_cache_dir = "data/cache/huggingface"
 manifest_path = "data/cache/manifests/textvqa_validation.jsonl"
+train_manifest_path = "data/cache/manifests/textvqa_train_remainder.jsonl"
+internal_dev_manifest_path = "data/cache/manifests/textvqa_internal_dev.jsonl"
+train_remainder_manifest_path = "data/cache/manifests/textvqa_train_remainder.jsonl"
+validation_manifest_path = "data/cache/manifests/textvqa_validation.jsonl"
+test_manifest_path = "data/cache/manifests/textvqa_test.jsonl"
 image_root = ""
-

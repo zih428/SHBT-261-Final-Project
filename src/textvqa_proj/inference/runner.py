@@ -8,6 +8,7 @@ from statistics import mean
 from textvqa_proj.config import Settings
 from textvqa_proj.data.dataset import TextVQASample, load_huggingface_split, load_manifest
 from textvqa_proj.eval.bootstrap_ci import bootstrap_mean_ci
+from textvqa_proj.eval.breakdowns import compute_prediction_breakdowns
 from textvqa_proj.eval.semantic_metrics import (
     aggregate_token_overlap,
     try_optional_semantic_metrics,
@@ -30,14 +31,57 @@ def _select_reference_answer(answers: list[str]) -> str:
     return counts.most_common(1)[0][0]
 
 
+def _resolve_manifest(settings: Settings, split: str) -> Path | None:
+    normalized = split.replace("-", "_")
+    if normalized == "train" and settings.data.train_manifest_path:
+        return Path(settings.data.train_manifest_path)
+    if normalized == "internal_dev" and settings.data.internal_dev_manifest_path:
+        return Path(settings.data.internal_dev_manifest_path)
+    if (
+        normalized in {"train_remainder", "train_rest"}
+        and settings.data.train_remainder_manifest_path
+    ):
+        return Path(settings.data.train_remainder_manifest_path)
+    if normalized == "validation" and settings.data.validation_manifest_path:
+        return Path(settings.data.validation_manifest_path)
+    if normalized == "test" and settings.data.test_manifest_path:
+        return Path(settings.data.test_manifest_path)
+    if settings.data.manifest_path:
+        return Path(settings.data.manifest_path)
+    return None
+
+
+def _validate_external_ocr_requirements(settings: Settings) -> None:
+    if settings.prompt.ocr_source not in {"external", "fused"}:
+        return
+    external_path = settings.data.external_ocr_manifest_path
+    if not external_path:
+        raise RuntimeError(
+            "This config requests external/fused OCR, but "
+            "data.external_ocr_manifest_path is not set."
+        )
+    if not Path(external_path).exists():
+        raise RuntimeError(
+            f"External OCR manifest {external_path} does not exist. "
+            "Run materialize-external-ocr first."
+        )
+
+
 def load_samples_for_settings(settings: Settings) -> list[TextVQASample]:
-    if settings.data.manifest_path and Path(settings.data.manifest_path).exists():
-        return load_manifest(Path(settings.data.manifest_path), limit=settings.experiment.limit)
+    _validate_external_ocr_requirements(settings)
+    manifest_path = _resolve_manifest(settings, settings.experiment.split)
+    if manifest_path and manifest_path.exists():
+        return load_manifest(
+            manifest_path,
+            limit=settings.experiment.limit,
+            external_ocr_path=settings.data.external_ocr_manifest_path,
+        )
     return load_huggingface_split(
         settings.data.hf_dataset_name,
         settings.experiment.split,
         cache_dir=settings.data.hf_cache_dir,
         limit=settings.experiment.limit,
+        external_ocr_path=settings.data.external_ocr_manifest_path,
     )
 
 
@@ -45,7 +89,11 @@ class ExperimentRunner:
     def __init__(self, settings: Settings, adapter: BaseModelAdapter) -> None:
         self.settings = settings
         self.adapter = adapter
-        run_root = Path(settings.runtime.output_root) / settings.experiment.name / settings.run_name
+        run_root = (
+            Path(settings.runtime.output_root)
+            / settings.experiment.name
+            / settings.run_dir_name
+        )
         self.run_store = RunStore(
             ensure_dir(run_root),
             settings,
@@ -53,6 +101,7 @@ class ExperimentRunner:
 
     def run(self) -> dict[str, object]:
         samples = load_samples_for_settings(self.settings)
+        samples_by_id = {sample.sample_id: sample for sample in samples}
         completed_ids = (
             self.run_store.load_completed_ids() if self.settings.experiment.resume else set()
         )
@@ -143,5 +192,6 @@ class ExperimentRunner:
                     for prediction in predictions
                 )
             )
+        self.run_store.write_breakdowns(compute_prediction_breakdowns(predictions, samples_by_id))
         self.run_store.finalize(metrics)
         return metrics

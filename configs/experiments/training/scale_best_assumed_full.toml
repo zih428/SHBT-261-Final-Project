@@ -1,0 +1,39 @@
+# Adjust this config if the core matrix chooses a different winner than the current default.
+[runtime]
+seed = 7
+
+[experiment]
+name = "lora-data-scaling"
+run_name = "best-assumed-full"
+resume = true
+
+[prompt]
+template = "ocr_injected_normalized"
+include_ocr = true
+normalize_ocr = true
+ocr_source = "dataset"
+
+[training]
+output_root = "outputs/training"
+train_split = "train"
+eval_split = "internal_dev"
+eval_limit = 512
+per_device_train_batch_size = 1
+per_device_eval_batch_size = 1
+gradient_accumulation_steps = 8
+num_train_epochs = 1.0
+learning_rate = 0.0002
+weight_decay = 0.0
+warmup_ratio = 0.03
+logging_steps = 10
+save_steps = 100
+eval_steps = 100
+save_total_limit = 2
+gradient_checkpointing = true
+
+[lora]
+rank = 16
+alpha = 32
+dropout = 0.05
+bias = "none"
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

@@ -12,19 +12,61 @@ from textvqa_proj.training.collators import (
     build_supervised_example,
 )
 from textvqa_proj.training.lora import build_peft_config
-from textvqa_proj.training.trainer import TrainingPaths, latest_checkpoint, write_trainer_state
+from textvqa_proj.training.trainer import (
+    TrainingPaths,
+    latest_checkpoint,
+    write_trainer_state,
+    write_training_settings,
+)
 from textvqa_proj.utils.device import pick_device
 from textvqa_proj.utils.io import ensure_dir
 
 LOGGER = logging.getLogger(__name__)
 
 
+def _validate_external_ocr_requirements(settings: Settings) -> None:
+    if settings.prompt.ocr_source not in {"external", "fused"}:
+        return
+    external_path = settings.data.external_ocr_manifest_path
+    if not external_path:
+        raise RuntimeError(
+            "This training config requests external/fused OCR, but "
+            "data.external_ocr_manifest_path is not set."
+        )
+    if not Path(external_path).exists():
+        raise RuntimeError(
+            f"External OCR manifest {external_path} does not exist. "
+            "Run materialize-external-ocr first."
+        )
+
+
 def _resolve_manifest(settings: Settings, split: str) -> Path | None:
-    if split == settings.training.train_split and settings.data.train_manifest_path:
+    normalized = split.replace("-", "_")
+    if normalized == "train" and settings.data.train_manifest_path:
         return Path(settings.data.train_manifest_path)
-    if split == settings.training.eval_split and settings.data.validation_manifest_path:
+    if normalized == "internal_dev" and settings.data.internal_dev_manifest_path:
+        return Path(settings.data.internal_dev_manifest_path)
+    if (
+        normalized in {"train_remainder", "train_rest"}
+        and settings.data.train_remainder_manifest_path
+    ):
+        return Path(settings.data.train_remainder_manifest_path)
+    if normalized == "validation" and settings.data.validation_manifest_path:
         return Path(settings.data.validation_manifest_path)
-    if split == "validation" and settings.data.manifest_path:
+    if normalized == "test" and settings.data.test_manifest_path:
+        return Path(settings.data.test_manifest_path)
+    if (
+        normalized == settings.training.train_split.replace("-", "_")
+        and settings.data.train_manifest_path
+    ):
+        return Path(settings.data.train_manifest_path)
+    if (
+        settings.training.eval_split
+        and normalized == settings.training.eval_split.replace("-", "_")
+        and settings.data.manifest_path
+    ):
+        return Path(settings.data.manifest_path)
+    if settings.data.manifest_path:
         return Path(settings.data.manifest_path)
     return None
 
@@ -37,13 +79,18 @@ def load_training_samples(
 ) -> list[dict[str, object]]:
     manifest_path = _resolve_manifest(settings, split)
     if manifest_path and manifest_path.exists():
-        samples = load_manifest(manifest_path, limit=limit)
+        samples = load_manifest(
+            manifest_path,
+            limit=limit,
+            external_ocr_path=settings.data.external_ocr_manifest_path,
+        )
     else:
         samples = load_huggingface_split(
             settings.data.hf_dataset_name,
             split,
             cache_dir=settings.data.hf_cache_dir,
             limit=limit,
+            external_ocr_path=settings.data.external_ocr_manifest_path,
         )
     return [build_supervised_example(sample, settings.prompt) for sample in samples]
 
@@ -135,7 +182,12 @@ class QwenSingleSampleLoraCollator:
 
 
 def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]:
-    output_root = Path(settings.training.output_root) / settings.experiment.name / settings.run_name
+    _validate_external_ocr_requirements(settings)
+    output_root = (
+        Path(settings.training.output_root)
+        / settings.experiment.name
+        / settings.run_dir_name
+    )
     paths = TrainingPaths(ensure_dir(output_root))
     train_rows = load_training_samples(
         settings,
@@ -158,6 +210,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         output_root,
         status="dry-run" if dry_run else "ready",
     )
+    write_training_settings(paths, settings.to_dict())
 
     if settings.model.adapter != "qwen2_5_vl":
         raise RuntimeError(
@@ -240,6 +293,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         dataloader_num_workers=settings.runtime.num_workers,
         gradient_checkpointing=settings.training.gradient_checkpointing,
         report_to=[],
+        seed=settings.runtime.seed,
         use_mps_device=device == "mps",
     )
 

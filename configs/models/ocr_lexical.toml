@@ -1,0 +1,3 @@
+[model]
+adapter = "ocr_lexical"
+model_name = "heuristic/ocr-lexical"

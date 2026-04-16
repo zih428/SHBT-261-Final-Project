@@ -6,3 +6,4 @@ def test_real_backbones_are_registered() -> None:
     assert "blip2" in MODEL_REGISTRY
     assert "llava_hf" in MODEL_REGISTRY
     assert "internvl2_5" in MODEL_REGISTRY
+    assert "ocr_lexical" in MODEL_REGISTRY

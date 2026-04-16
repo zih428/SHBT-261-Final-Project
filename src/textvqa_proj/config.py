@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -33,7 +34,11 @@ class DataSettings:
     hf_cache_dir: str = "data/cache/huggingface"
     manifest_path: str | None = None
     train_manifest_path: str | None = None
+    internal_dev_manifest_path: str | None = None
+    train_remainder_manifest_path: str | None = None
     validation_manifest_path: str | None = None
+    test_manifest_path: str | None = None
+    external_ocr_manifest_path: str | None = None
     image_root: str = ""
 
 
@@ -54,6 +59,8 @@ class PromptSettings:
     template: str = "short_answer"
     include_ocr: bool = False
     normalize_ocr: bool = False
+    ocr_source: str = "dataset"
+    max_ocr_tokens: int | None = None
     system_message: str | None = None
 
 
@@ -124,6 +131,22 @@ class Settings:
     @property
     def run_name(self) -> str:
         return self.experiment.run_name or self.experiment.name
+
+    @property
+    def model_slug(self) -> str:
+        source = self.model.model_name.rsplit("/", maxsplit=1)[-1] or self.model.adapter
+        return re.sub(r"[^a-z0-9]+", "-", source.casefold()).strip("-")
+
+    @property
+    def run_dir_name(self) -> str:
+        base = re.sub(r"[^a-z0-9]+", "-", self.run_name.casefold()).strip("-")
+        if not base:
+            base = "run"
+        if self.model.adapter == "fake":
+            return base
+        if base.startswith(f"{self.model_slug}-"):
+            return base
+        return f"{self.model_slug}-{base}"
 
 
 def _build_settings(raw: dict[str, Any]) -> Settings:

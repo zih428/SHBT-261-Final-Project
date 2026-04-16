@@ -5,6 +5,10 @@ from pathlib import Path
 
 from textvqa_proj.config import load_settings
 from textvqa_proj.data.dataset import write_manifest
+from textvqa_proj.data.prepare import (
+    materialize_external_ocr_manifest,
+    materialize_internal_dev_split,
+)
 from textvqa_proj.inference.runner import ExperimentRunner, load_samples_for_settings
 from textvqa_proj.models.registry import create_adapter
 from textvqa_proj.training.runner import run_training
@@ -35,6 +39,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_config_args(materialize)
     materialize.add_argument("--output", required=False, help="Manifest output path override.")
+
+    materialize_dev = subparsers.add_parser(
+        "materialize-dev-split",
+        help="Create the stratified internal-dev split and train remainder manifests.",
+    )
+    add_config_args(materialize_dev)
+    materialize_dev.add_argument("--subset-size", type=int, default=2000)
+    materialize_dev.add_argument("--output-dev", required=True)
+    materialize_dev.add_argument("--output-train", required=True)
+
+    materialize_external_ocr = subparsers.add_parser(
+        "materialize-external-ocr",
+        help="Run an external OCR engine and write a JSONL sidecar manifest.",
+    )
+    add_config_args(materialize_external_ocr)
+    materialize_external_ocr.add_argument("--split", required=True)
+    materialize_external_ocr.add_argument("--output", required=True)
+    materialize_external_ocr.add_argument("--limit", type=int, default=None)
 
     evaluate = subparsers.add_parser("evaluate", help="Run resumable evaluation.")
     add_config_args(evaluate)
@@ -74,6 +96,26 @@ def main() -> None:
         )
         write_manifest(output_path, samples)
         print(output_path)
+        return
+
+    if args.command == "materialize-dev-split":
+        summary = materialize_internal_dev_split(
+            settings,
+            subset_size=args.subset_size,
+            dev_output_path=Path(args.output_dev),
+            train_output_path=Path(args.output_train),
+        )
+        print(summary)
+        return
+
+    if args.command == "materialize-external-ocr":
+        summary = materialize_external_ocr_manifest(
+            settings,
+            split=args.split,
+            output_path=Path(args.output),
+            limit=args.limit,
+        )
+        print(summary)
         return
 
     if args.command == "evaluate":

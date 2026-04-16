@@ -65,6 +65,7 @@ class RunStore:
         self.predictions_path = self.root / "predictions.jsonl"
         self.progress_path = self.root / "progress.json"
         self.metrics_path = self.root / "metrics.json"
+        self.breakdowns_path = self.root / "breakdowns.json"
         self.settings_path = self.root / "settings.json"
         if self.predictions_path.exists() and not settings.experiment.resume:
             raise RuntimeError(
@@ -105,3 +106,6 @@ class RunStore:
     def finalize(self, metrics: dict[str, Any]) -> None:
         atomic_write_json(self.metrics_path, metrics)
         self.write_progress(status="completed", extra={"metrics_path": str(self.metrics_path)})
+
+    def write_breakdowns(self, payload: dict[str, Any]) -> None:
+        atomic_write_json(self.breakdowns_path, payload)

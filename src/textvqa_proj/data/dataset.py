@@ -15,6 +15,7 @@ class TextVQASample:
     image: str
     answers: tuple[str, ...]
     ocr_tokens: tuple[str, ...] = ()
+    external_ocr_tokens: tuple[str, ...] = ()
     split: str | None = None
     question_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -26,6 +27,7 @@ class TextVQASample:
             "image": self.image,
             "answers": list(self.answers),
             "ocr_tokens": list(self.ocr_tokens),
+            "external_ocr_tokens": list(self.external_ocr_tokens),
             "split": self.split,
             "question_id": self.question_id,
             "metadata": self.metadata,
@@ -40,6 +42,7 @@ class TextVQASample:
             image=record["image"],
             answers=tuple(record.get("answers", [])),
             ocr_tokens=tuple(record.get("ocr_tokens", [])),
+            external_ocr_tokens=tuple(record.get("external_ocr_tokens", [])),
             split=record.get("split"),
             question_id=str(record.get("question_id"))
             if record.get("question_id") is not None
@@ -48,12 +51,55 @@ class TextVQASample:
         )
 
 
-def load_manifest(path: Path, limit: int | None = None) -> list[TextVQASample]:
+def _coerce_tokens(value: Any) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(str(token) for token in value if str(token).strip())
+
+
+def load_external_ocr_map(path: Path) -> dict[str, tuple[str, ...]]:
+    records: dict[str, tuple[str, ...]] = {}
+    for record in iter_jsonl(path):
+        sample_id = str(record.get("sample_id") or record.get("question_id") or "").strip()
+        if not sample_id:
+            continue
+        tokens = _coerce_tokens(
+            record.get("external_ocr_tokens") or record.get("ocr_tokens") or record.get("tokens")
+        )
+        records[sample_id] = tokens
+    return records
+
+
+def _attach_external_ocr(
+    samples: list[TextVQASample],
+    external_ocr: dict[str, tuple[str, ...]],
+) -> None:
+    if not external_ocr:
+        return
+    for sample in samples:
+        keys = [sample.sample_id]
+        if sample.question_id:
+            keys.append(sample.question_id)
+        for key in keys:
+            tokens = external_ocr.get(key)
+            if tokens:
+                sample.external_ocr_tokens = tokens
+                break
+
+
+def load_manifest(
+    path: Path,
+    limit: int | None = None,
+    *,
+    external_ocr_path: str | Path | None = None,
+) -> list[TextVQASample]:
     samples: list[TextVQASample] = []
     for index, record in enumerate(iter_jsonl(path)):
         if limit is not None and index >= limit:
             break
         samples.append(TextVQASample.from_record(record))
+    if external_ocr_path:
+        _attach_external_ocr(samples, load_external_ocr_map(Path(external_ocr_path)))
     return samples
 
 
@@ -66,6 +112,8 @@ def load_huggingface_split(
     split: str,
     cache_dir: str | None = None,
     limit: int | None = None,
+    *,
+    external_ocr_path: str | Path | None = None,
 ) -> list[TextVQASample]:
     try:
         from datasets import load_dataset
@@ -90,6 +138,7 @@ def load_huggingface_split(
                 image=str(image_path),
                 answers=tuple(record.get("answers", [])),
                 ocr_tokens=tuple(record.get("ocr_tokens", [])),
+                external_ocr_tokens=(),
                 split=record.get("set_name") or split,
                 question_id=str(record.get("question_id"))
                 if record.get("question_id") is not None
@@ -101,4 +150,6 @@ def load_huggingface_split(
                 },
             )
         )
+    if external_ocr_path:
+        _attach_external_ocr(samples, load_external_ocr_map(Path(external_ocr_path)))
     return samples

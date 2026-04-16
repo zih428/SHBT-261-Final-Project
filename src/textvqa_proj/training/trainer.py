@@ -26,10 +26,19 @@ class TrainingPaths:
     def state_path(self) -> Path:
         return self.root / "trainer_state.json"
 
+    @property
+    def settings_path(self) -> Path:
+        return self.root / "settings.json"
+
 
 def write_trainer_state(paths: TrainingPaths, payload: dict[str, object]) -> None:
     ensure_dir(paths.root)
     atomic_write_json(paths.state_path, payload)
+
+
+def write_training_settings(paths: TrainingPaths, payload: dict[str, object]) -> None:
+    ensure_dir(paths.root)
+    atomic_write_json(paths.settings_path, payload)
 
 
 def latest_checkpoint(paths: TrainingPaths) -> Path | None:
