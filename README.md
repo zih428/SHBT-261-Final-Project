@@ -176,11 +176,13 @@ Each training run saves:
 ## Resume behavior
 
 - Evaluation is resumable by re-reading `predictions.jsonl` and skipping completed sample IDs.
+- If a run already has all predictions but is missing final metrics, rerunning it now recomputes metrics without reloading the model.
 - Training resumes from the latest `checkpoint-*` directory if a run directory already exists.
 - External OCR sidecar generation resumes by re-reading the existing output JSONL and skipping completed sample IDs.
 - Output directories are namespaced by model slug plus run name to avoid collisions across the experiment matrix.
 - External/fused OCR configs fail fast if the required OCR sidecar manifest is missing.
 - The batch runner writes screening and finalist promotion summaries to `outputs/logs/run_all/<timestamp>/` so the chosen finalists and winning evaluation backbone are recorded for later write-up.
+- Optional semantic metrics degrade gracefully if NLTK corpora such as `wordnet` are absent, so experiment runs do not crash after prediction generation.
 
 ## Notes
 

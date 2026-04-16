@@ -113,45 +113,46 @@ class ExperimentRunner:
             len(completed_ids),
         )
 
-        self.adapter.load()
-        try:
-            batch_size = max(1, self.settings.experiment.batch_size)
-            for start in range(0, len(pending_samples), batch_size):
-                batch = pending_samples[start : start + batch_size]
-                prompts = [build_prompt(sample, self.settings.prompt) for sample in batch]
-                with time_block() as timing:
-                    raw_predictions = self.adapter.generate_batch(
-                        batch, prompts, self.settings.generation
-                    )
-                latency = timing["elapsed_seconds"] / max(len(batch), 1)
-                for sample, prompt, raw_prediction in zip(
-                    batch, prompts, raw_predictions, strict=True
-                ):
-                    cleaned_prediction, normalized_prediction = clean_and_normalize_prediction(
-                        raw_prediction
-                    )
-                    score = score_prediction(cleaned_prediction, sample.answers)
-                    record = PredictionRecord(
-                        sample_id=sample.sample_id,
-                        prediction=cleaned_prediction,
-                        normalized_prediction=normalized_prediction,
-                        answers=list(sample.answers),
-                        normalized_answers=score.normalized_answers,
-                        reference_answer=_select_reference_answer(score.normalized_answers),
-                        any_match=score.any_match,
-                        consensus_match=score.consensus_match,
-                        question=sample.question,
-                        prompt_template=prompt.metadata["template"],
-                        latency_seconds=latency,
-                        metadata={
-                            "ocr_token_count": len(sample.ocr_tokens),
-                            "split": sample.split,
-                            "question_id": sample.question_id,
-                        },
-                    )
-                    self.run_store.append_prediction(record)
-        finally:
-            self.adapter.unload()
+        if pending_samples:
+            self.adapter.load()
+            try:
+                batch_size = max(1, self.settings.experiment.batch_size)
+                for start in range(0, len(pending_samples), batch_size):
+                    batch = pending_samples[start : start + batch_size]
+                    prompts = [build_prompt(sample, self.settings.prompt) for sample in batch]
+                    with time_block() as timing:
+                        raw_predictions = self.adapter.generate_batch(
+                            batch, prompts, self.settings.generation
+                        )
+                    latency = timing["elapsed_seconds"] / max(len(batch), 1)
+                    for sample, prompt, raw_prediction in zip(
+                        batch, prompts, raw_predictions, strict=True
+                    ):
+                        cleaned_prediction, normalized_prediction = clean_and_normalize_prediction(
+                            raw_prediction
+                        )
+                        score = score_prediction(cleaned_prediction, sample.answers)
+                        record = PredictionRecord(
+                            sample_id=sample.sample_id,
+                            prediction=cleaned_prediction,
+                            normalized_prediction=normalized_prediction,
+                            answers=list(sample.answers),
+                            normalized_answers=score.normalized_answers,
+                            reference_answer=_select_reference_answer(score.normalized_answers),
+                            any_match=score.any_match,
+                            consensus_match=score.consensus_match,
+                            question=sample.question,
+                            prompt_template=prompt.metadata["template"],
+                            latency_seconds=latency,
+                            metadata={
+                                "ocr_token_count": len(sample.ocr_tokens),
+                                "split": sample.split,
+                                "question_id": sample.question_id,
+                            },
+                        )
+                        self.run_store.append_prediction(record)
+            finally:
+                self.adapter.unload()
 
         predictions = self.run_store.load_predictions()
         match_results = [

@@ -65,11 +65,15 @@ def try_optional_semantic_metrics(pairs: Iterable[tuple[str, str]]) -> dict[str,
     except ImportError:
         pass
     else:
-        meteor_scores = [
-            meteor_score([reference.split()], prediction.split())
-            for prediction, reference in materialized
-        ]
-        results["meteor"] = mean(meteor_scores)
+        try:
+            meteor_scores = [
+                meteor_score([reference.split()], prediction.split())
+                for prediction, reference in materialized
+            ]
+        except LookupError:
+            pass
+        else:
+            results["meteor"] = mean(meteor_scores)
 
     try:
         from rouge_score import rouge_scorer
