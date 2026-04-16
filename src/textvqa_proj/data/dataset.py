@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from textvqa_proj.utils.io import iter_jsonl, write_jsonl
+from textvqa_proj.utils.io import ensure_dir, iter_jsonl, write_jsonl
 
 
 @dataclass(slots=True)
@@ -87,6 +87,35 @@ def _attach_external_ocr(
                 break
 
 
+def _materialize_image(
+    image: Any,
+    *,
+    cache_dir: str | None,
+    split: str,
+    sample_id: str,
+) -> str:
+    if isinstance(image, dict):
+        image_path = image.get("path")
+        if image_path:
+            return str(image_path)
+
+    if cache_dir is None:
+        raise RuntimeError(
+            "cache_dir is required when the dataset does not expose a local image path."
+        )
+
+    cache_root = ensure_dir(Path(cache_dir) / "materialized_images" / split)
+    image_path = cache_root / f"{sample_id}.jpg"
+    if image_path.exists():
+        return str(image_path)
+
+    if hasattr(image, "convert") and hasattr(image, "save"):
+        image.convert("RGB").save(image_path, format="JPEG", quality=95)
+        return str(image_path)
+
+    raise RuntimeError(f"Unsupported image payload type: {type(image)!r}")
+
+
 def load_manifest(
     path: Path,
     limit: int | None = None,
@@ -126,14 +155,16 @@ def load_huggingface_split(
         if limit is not None and index >= limit:
             break
         image = record["image"]
-        image_path = None
-        if isinstance(image, dict) and "path" in image:
-            image_path = image["path"]
-        if image_path is None:
-            image_path = record.get("flickr_300k_url") or record.get("flickr_original_url") or ""
+        sample_id = str(record.get("question_id", index))
+        image_path = _materialize_image(
+            image,
+            cache_dir=cache_dir,
+            split=split,
+            sample_id=sample_id,
+        )
         samples.append(
             TextVQASample(
-                sample_id=str(record.get("question_id", index)),
+                sample_id=sample_id,
                 question=record["question"],
                 image=str(image_path),
                 answers=tuple(record.get("answers", [])),

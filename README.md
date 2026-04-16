@@ -46,6 +46,8 @@ textvqa-proj materialize-dev-split \
   --output-train data/cache/manifests/textvqa_train_remainder.jsonl
 ```
 
+These manifests cache local image files from the HF dataset image column, so later OCR/model runs do not depend on brittle Flickr URLs.
+
 Materialize the external OCR sidecar needed for fused-OCR experiments:
 
 ```bash

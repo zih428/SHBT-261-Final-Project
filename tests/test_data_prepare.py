@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 
 from textvqa_proj.config import Settings
-from textvqa_proj.data.dataset import TextVQASample, write_manifest
+from textvqa_proj.data.dataset import TextVQASample, load_huggingface_split, write_manifest
 from textvqa_proj.data.prepare import materialize_external_ocr_manifest
 
 
@@ -55,3 +55,39 @@ def test_materialize_external_ocr_uses_internal_dev_manifest(
     assert summary["count"] == 1
     saved = output_path.read_text(encoding="utf-8")
     assert "OPEN" in saved
+
+
+def test_hf_loader_materializes_pil_images(tmp_path: Path, monkeypatch) -> None:
+    fake_image = Image.new("RGB", (3, 3), color="white")
+
+    def fake_load_dataset(name: str, *, split: str, cache_dir: str | None = None):
+        del name, split, cache_dir
+        return [
+            {
+                "question_id": 123,
+                "question": "What word is shown?",
+                "image": fake_image,
+                "answers": ["open"],
+                "ocr_tokens": ["OPEN"],
+                "set_name": "validation",
+                "image_id": "abc",
+                "image_width": 3,
+                "image_height": 3,
+            }
+        ]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        types.SimpleNamespace(load_dataset=fake_load_dataset),
+    )
+
+    samples = load_huggingface_split(
+        "lmms-lab/textvqa",
+        "validation",
+        cache_dir=str(tmp_path / "hf"),
+    )
+
+    image_path = Path(samples[0].image)
+    assert image_path.exists()
+    assert image_path.suffix == ".jpg"
