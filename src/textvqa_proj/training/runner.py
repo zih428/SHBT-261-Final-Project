@@ -19,6 +19,7 @@ from textvqa_proj.training.trainer import (
     write_training_settings,
 )
 from textvqa_proj.utils.device import pick_device
+from textvqa_proj.utils.hf import local_files_only
 from textvqa_proj.utils.io import ensure_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -250,6 +251,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
     processor = AutoProcessor.from_pretrained(
         settings.model.processor_name or settings.model.model_name,
         revision=settings.model.revision,
+        local_files_only=local_files_only(settings),
         **processor_kwargs,
     )
 
@@ -260,6 +262,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         revision=settings.model.revision,
         torch_dtype=dtype,
         trust_remote_code=settings.model.trust_remote_code,
+        local_files_only=local_files_only(settings),
     )
     model.to(device)
     model.config.use_cache = False

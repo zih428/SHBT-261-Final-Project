@@ -8,6 +8,7 @@ from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.models.base import BaseModelAdapter
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
+from textvqa_proj.utils.hf import local_files_only
 from textvqa_proj.utils.io import load_image
 
 
@@ -36,11 +37,13 @@ class LlavaHFAdapter(BaseModelAdapter):
             revision=self.settings.model.revision,
             torch_dtype=self._dtype,
             low_cpu_mem_usage=True,
+            local_files_only=local_files_only(self.settings),
         )
         self._model.to(self._device)
         self._processor = AutoProcessor.from_pretrained(
             self.settings.model.processor_name or self.settings.model.model_name,
             revision=self.settings.model.revision,
+            local_files_only=local_files_only(self.settings),
         )
 
     def generate_one(

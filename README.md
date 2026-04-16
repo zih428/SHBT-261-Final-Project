@@ -70,6 +70,7 @@ To launch the full queue end to end:
 ```
 
 The orchestration script performs prep, runs the `24` screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
+It launches subprocesses in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
 
 ## Experiment surface
 
@@ -183,6 +184,7 @@ Each training run saves:
 - External/fused OCR configs fail fast if the required OCR sidecar manifest is missing.
 - The batch runner writes screening and finalist promotion summaries to `outputs/logs/run_all/<timestamp>/` so the chosen finalists and winning evaluation backbone are recorded for later write-up.
 - Optional semantic metrics degrade gracefully if NLTK corpora such as `wordnet` are absent, so experiment runs do not crash after prediction generation.
+- The batch runner keeps going past failed model/config combinations and preserves the per-run error logs, which is useful if some backbones are not fully cached locally.
 
 ## Notes
 

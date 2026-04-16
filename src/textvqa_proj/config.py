@@ -50,6 +50,7 @@ class ModelSettings:
     revision: str = "main"
     torch_dtype: str = "float16"
     trust_remote_code: bool = False
+    local_files_only: bool = False
     min_pixels: int | None = None
     max_pixels: int | None = None
 

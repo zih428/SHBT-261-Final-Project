@@ -7,6 +7,7 @@ from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.models.base import BaseModelAdapter
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
+from textvqa_proj.utils.hf import local_files_only
 
 
 class Qwen25VLAdapter(BaseModelAdapter):
@@ -34,6 +35,7 @@ class Qwen25VLAdapter(BaseModelAdapter):
         model_kwargs: dict[str, Any] = {
             "torch_dtype": getattr(torch, self.settings.model.torch_dtype, "auto"),
             "trust_remote_code": self.settings.model.trust_remote_code,
+            "local_files_only": local_files_only(self.settings),
         }
         self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             self.settings.model.model_name,
@@ -50,6 +52,7 @@ class Qwen25VLAdapter(BaseModelAdapter):
         self._processor = AutoProcessor.from_pretrained(
             self.settings.model.processor_name or self.settings.model.model_name,
             revision=self.settings.model.revision,
+            local_files_only=local_files_only(self.settings),
             **processor_kwargs,
         )
         self._process_vision_info = process_vision_info

@@ -7,6 +7,7 @@ from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.models.base import BaseModelAdapter
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
+from textvqa_proj.utils.hf import local_files_only
 from textvqa_proj.utils.io import load_image
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -111,6 +112,7 @@ class InternVL25Adapter(BaseModelAdapter):
             torch_dtype=self._dtype,
             low_cpu_mem_usage=True,
             trust_remote_code=self.settings.model.trust_remote_code,
+            local_files_only=local_files_only(self.settings),
         ).eval()
         self._model.to(self._device)
         self._tokenizer = AutoTokenizer.from_pretrained(
@@ -118,6 +120,7 @@ class InternVL25Adapter(BaseModelAdapter):
             revision=self.settings.model.revision,
             trust_remote_code=self.settings.model.trust_remote_code,
             use_fast=False,
+            local_files_only=local_files_only(self.settings),
         )
 
     def _build_pixel_values(self, image_source: str):

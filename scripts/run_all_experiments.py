@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import asdict
@@ -88,12 +89,17 @@ def run_command(
         return
     log_path = log_root / f"{label}.log"
     ensure_dir(log_path.parent)
+    env = dict(os.environ)
+    env.setdefault("TEXTVQA_OFFLINE", "1")
+    env.setdefault("HF_HUB_OFFLINE", "1")
+    env.setdefault("TRANSFORMERS_OFFLINE", "1")
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(f"$ {' '.join(command)}\n")
         handle.flush()
         subprocess.run(
             command,
             cwd=REPO_ROOT,
+            env=env,
             stdout=handle,
             stderr=subprocess.STDOUT,
             check=True,
@@ -193,18 +199,22 @@ def run_evaluations(
                     results.append(result)
                 print(f"[skip] {stage_name} {model_config.stem} {experiment_config.stem}")
                 continue
-            run_command(
-                label=f"{stage_name}-{model_config.stem}-{experiment_config.stem}",
-                command=[
-                    sys.executable,
-                    "-m",
-                    "textvqa_proj.cli",
-                    "evaluate",
-                    *config_args(config_paths),
-                ],
-                log_root=log_root,
-                dry_run=dry_run,
-            )
+            try:
+                run_command(
+                    label=f"{stage_name}-{model_config.stem}-{experiment_config.stem}",
+                    command=[
+                        sys.executable,
+                        "-m",
+                        "textvqa_proj.cli",
+                        "evaluate",
+                        *config_args(config_paths),
+                    ],
+                    log_root=log_root,
+                    dry_run=dry_run,
+                )
+            except subprocess.CalledProcessError:
+                print(f"[failed] {stage_name} {model_config.stem} {experiment_config.stem}")
+                continue
             if dry_run:
                 continue
             result = load_evaluation_result(REPO_ROOT, config_paths)
@@ -222,18 +232,21 @@ def run_training_queue(*, log_root: Path, dry_run: bool) -> None:
         if training_completed(REPO_ROOT, config_paths):
             print(f"[skip] training {training_config.stem}")
             continue
-        run_command(
-            label=f"training-{training_config.stem}",
-            command=[
-                sys.executable,
-                "-m",
-                "textvqa_proj.cli",
-                "train",
-                *config_args(config_paths),
-            ],
-            log_root=log_root,
-            dry_run=dry_run,
-        )
+        try:
+            run_command(
+                label=f"training-{training_config.stem}",
+                command=[
+                    sys.executable,
+                    "-m",
+                    "textvqa_proj.cli",
+                    "train",
+                    *config_args(config_paths),
+                ],
+                log_root=log_root,
+                dry_run=dry_run,
+            )
+        except subprocess.CalledProcessError:
+            print(f"[failed] training {training_config.stem}")
 
 
 def write_stage_summary(
