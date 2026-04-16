@@ -1,0 +1,25 @@
+[experiment]
+name = "smoke"
+run_name = "smoke-fake"
+split = "validation"
+limit = 8
+batch_size = 2
+resume = true
+match_type = "any"
+include_semantic_metrics = true
+
+[prompt]
+template = "ocr_copy_first"
+include_ocr = true
+normalize_ocr = false
+
+[generation]
+max_new_tokens = 6
+temperature = 0.0
+top_p = 1.0
+do_sample = false
+
+[model]
+adapter = "fake"
+model_name = "debug/fake-answerer"
+

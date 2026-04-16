@@ -1,0 +1,6 @@
+[data]
+hf_dataset_name = "lmms-lab/textvqa"
+hf_cache_dir = "data/cache/huggingface"
+manifest_path = "data/cache/manifests/textvqa_validation.jsonl"
+image_root = ""
+

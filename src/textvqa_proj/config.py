@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import tomllib
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+def _merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _merge_dicts(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+@dataclass(slots=True)
+class RuntimeSettings:
+    seed: int = 7
+    log_level: str = "INFO"
+    output_root: str = "outputs/runs"
+    cache_root: str = "data/cache"
+    device_order: list[str] = field(default_factory=lambda: ["mps", "cuda", "cpu"])
+    num_workers: int = 2
+
+
+@dataclass(slots=True)
+class DataSettings:
+    hf_dataset_name: str = "lmms-lab/textvqa"
+    hf_cache_dir: str = "data/cache/huggingface"
+    manifest_path: str | None = None
+    image_root: str = ""
+
+
+@dataclass(slots=True)
+class ModelSettings:
+    adapter: str = "fake"
+    model_name: str = "debug/fake-answerer"
+    processor_name: str | None = None
+    revision: str = "main"
+    torch_dtype: str = "float16"
+    trust_remote_code: bool = False
+    min_pixels: int | None = None
+    max_pixels: int | None = None
+
+
+@dataclass(slots=True)
+class PromptSettings:
+    template: str = "short_answer"
+    include_ocr: bool = False
+    normalize_ocr: bool = False
+    system_message: str | None = None
+
+
+@dataclass(slots=True)
+class GenerationSettings:
+    max_new_tokens: int = 8
+    temperature: float = 0.0
+    top_p: float = 1.0
+    do_sample: bool = False
+
+
+@dataclass(slots=True)
+class ExperimentSettings:
+    name: str = "smoke"
+    run_name: str | None = None
+    split: str = "validation"
+    limit: int | None = None
+    batch_size: int = 1
+    resume: bool = True
+    match_type: str = "any"
+    include_semantic_metrics: bool = True
+
+
+@dataclass(slots=True)
+class Settings:
+    runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
+    data: DataSettings = field(default_factory=DataSettings)
+    model: ModelSettings = field(default_factory=ModelSettings)
+    prompt: PromptSettings = field(default_factory=PromptSettings)
+    generation: GenerationSettings = field(default_factory=GenerationSettings)
+    experiment: ExperimentSettings = field(default_factory=ExperimentSettings)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @property
+    def run_name(self) -> str:
+        return self.experiment.run_name or self.experiment.name
+
+
+def _build_settings(raw: dict[str, Any]) -> Settings:
+    return Settings(
+        runtime=RuntimeSettings(**raw.get("runtime", {})),
+        data=DataSettings(**raw.get("data", {})),
+        model=ModelSettings(**raw.get("model", {})),
+        prompt=PromptSettings(**raw.get("prompt", {})),
+        generation=GenerationSettings(**raw.get("generation", {})),
+        experiment=ExperimentSettings(**raw.get("experiment", {})),
+    )
+
+
+def load_settings(config_paths: list[Path]) -> Settings:
+    merged: dict[str, Any] = {}
+    for config_path in config_paths:
+        with config_path.open("rb") as handle:
+            parsed = tomllib.load(handle)
+        merged = _merge_dicts(merged, parsed)
+    return _build_settings(merged)

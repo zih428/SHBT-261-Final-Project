@@ -1,0 +1,17 @@
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+.venv/
+__pycache__/
+*.py[cod]
+
+data/raw/
+data/cache/
+data/splits/
+outputs/
+
+Final Project.pdf
+textvqa_revised_experiment_plan.md

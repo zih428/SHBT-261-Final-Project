@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "textvqa-project"
+version = "0.1.0"
+description = "Resumable TextVQA experimentation scaffold for SHBT 261."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+  {name = "Zih Hu"},
+]
+dependencies = [
+  "pillow>=11.1.0",
+  "typing-extensions>=4.12.2; python_version < '3.13'",
+]
+
+[project.optional-dependencies]
+metrics = [
+  "nltk>=3.9.1",
+  "rouge-score>=0.1.2",
+]
+models = [
+  "accelerate>=1.5.2",
+  "datasets>=3.5.0",
+  "evaluate>=0.4.3",
+  "peft>=0.15.2",
+  "sentencepiece>=0.2.0",
+  "transformers>=4.51.0",
+]
+dev = [
+  "pytest>=8.3.5",
+  "ruff>=0.11.5",
+]
+
+[project.scripts]
+textvqa-proj = "textvqa_proj.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/textvqa_proj"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
