@@ -56,6 +56,8 @@ textvqa-proj materialize-external-ocr \
   --output data/cache/external_ocr/textvqa_validation_rapidocr.jsonl
 ```
 
+For internal-dev fused OCR, run the same command with `--split internal_dev` after the internal-dev manifest has been materialized.
+
 ## Experiment surface
 
 Real model configs:

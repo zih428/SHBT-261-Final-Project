@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from textvqa_proj.config import Settings
-from textvqa_proj.data.dataset import load_huggingface_split, write_manifest
+from textvqa_proj.data.dataset import load_huggingface_split, load_manifest, write_manifest
 from textvqa_proj.data.splits import stratified_subset
 from textvqa_proj.utils.io import ensure_dir, load_image, write_jsonl
 
@@ -57,12 +57,25 @@ def materialize_external_ocr_manifest(
             "Install it with uv pip install -e '.[ocr]'."
         ) from exc
 
-    samples = load_huggingface_split(
-        settings.data.hf_dataset_name,
-        split,
-        cache_dir=settings.data.hf_cache_dir,
-        limit=limit,
-    )
+    normalized = split.replace("-", "_")
+    manifest_map = {
+        "train": settings.data.train_manifest_path,
+        "internal_dev": settings.data.internal_dev_manifest_path,
+        "train_remainder": settings.data.train_remainder_manifest_path,
+        "train_rest": settings.data.train_remainder_manifest_path,
+        "validation": settings.data.validation_manifest_path or settings.data.manifest_path,
+        "test": settings.data.test_manifest_path,
+    }
+    manifest_path = manifest_map.get(normalized)
+    if manifest_path and Path(manifest_path).exists():
+        samples = load_manifest(Path(manifest_path), limit=limit)
+    else:
+        samples = load_huggingface_split(
+            settings.data.hf_dataset_name,
+            split,
+            cache_dir=settings.data.hf_cache_dir,
+            limit=limit,
+        )
     ensure_dir(output_path.parent)
     engine = RapidOCR()
     records: list[dict[str, Any]] = []
