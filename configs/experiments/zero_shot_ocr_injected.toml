@@ -1,0 +1,20 @@
+[experiment]
+name = "zero-shot-ocr-injected"
+run_name = "ocr-injected"
+split = "validation"
+limit = 500
+batch_size = 1
+resume = true
+match_type = "any"
+include_semantic_metrics = true
+
+[prompt]
+template = "ocr_injected"
+include_ocr = true
+normalize_ocr = false
+
+[generation]
+max_new_tokens = 8
+temperature = 0.0
+top_p = 1.0
+do_sample = false
