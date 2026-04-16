@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from textvqa_proj.config import GenerationSettings
@@ -8,7 +7,6 @@ from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.models.base import BaseModelAdapter
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
-from textvqa_proj.utils.io import load_image
 
 
 class Qwen25VLAdapter(BaseModelAdapter):
@@ -18,6 +16,7 @@ class Qwen25VLAdapter(BaseModelAdapter):
         super().__init__(settings)
         self._model = None
         self._processor = None
+        self._process_vision_info = None
         self._device = pick_device(settings.runtime.device_order)
 
     def load(self) -> None:
@@ -25,9 +24,12 @@ class Qwen25VLAdapter(BaseModelAdapter):
             return
         try:
             import torch
+            from qwen_vl_utils import process_vision_info
             from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
         except ImportError as exc:
-            raise RuntimeError("transformers is required for the Qwen2.5-VL adapter") from exc
+            raise RuntimeError(
+                "transformers and qwen-vl-utils are required for the Qwen2.5-VL adapter"
+            ) from exc
 
         model_kwargs: dict[str, Any] = {
             "torch_dtype": getattr(torch, self.settings.model.torch_dtype, "auto"),
@@ -50,6 +52,7 @@ class Qwen25VLAdapter(BaseModelAdapter):
             revision=self.settings.model.revision,
             **processor_kwargs,
         )
+        self._process_vision_info = process_vision_info
 
     def generate_one(
         self,
@@ -60,8 +63,8 @@ class Qwen25VLAdapter(BaseModelAdapter):
         self.load()
         assert self._model is not None
         assert self._processor is not None
+        assert self._process_vision_info is not None
 
-        image = load_image(Path(sample.image) if Path(sample.image).exists() else sample.image)
         messages = [
             {
                 "role": "system",
@@ -70,7 +73,7 @@ class Qwen25VLAdapter(BaseModelAdapter):
             {
                 "role": "user",
                 "content": [
-                    {"type": "image"},
+                    {"type": "image", "image": sample.image},
                     {"type": "text", "text": prompt.user_message},
                 ],
             },
@@ -80,9 +83,11 @@ class Qwen25VLAdapter(BaseModelAdapter):
             tokenize=False,
             add_generation_prompt=True,
         )
+        image_inputs, video_inputs = self._process_vision_info(messages)
         inputs = self._processor(
             text=[prompt_text],
-            images=[image],
+            images=image_inputs,
+            videos=video_inputs,
             padding=True,
             return_tensors="pt",
         )

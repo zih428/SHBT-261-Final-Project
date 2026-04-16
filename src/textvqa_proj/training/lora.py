@@ -1,15 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
-
-@dataclass(slots=True)
-class LoraSettings:
-    rank: int = 16
-    alpha: int = 32
-    dropout: float = 0.05
-    bias: str = "none"
-    target_modules: list[str] = field(default_factory=list)
+from textvqa_proj.config import LoraSettings
 
 
 def default_lora_targets(adapter_name: str) -> list[str]:

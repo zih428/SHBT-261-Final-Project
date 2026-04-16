@@ -27,7 +27,9 @@ models = [
   "datasets>=3.5.0",
   "evaluate>=0.4.3",
   "peft>=0.15.2",
+  "qwen-vl-utils>=0.0.8",
   "sentencepiece>=0.2.0",
+  "torchvision>=0.22.0",
   "transformers>=4.51.0",
 ]
 dev = [
@@ -56,4 +58,3 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-

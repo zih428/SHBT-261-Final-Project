@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-
-import numpy as np
 
 from textvqa_proj.config import GenerationSettings
 from textvqa_proj.data.dataset import TextVQASample
@@ -124,10 +121,10 @@ class InternVL25Adapter(BaseModelAdapter):
         )
 
     def _build_pixel_values(self, image_source: str):
+        import numpy as np
         import torch
 
-        image_path = Path(image_source)
-        image = load_image(image_path if image_path.exists() else image_source)
+        image = load_image(image_source)
         processed_images = dynamic_preprocess(
             image,
             image_size=self._input_size,

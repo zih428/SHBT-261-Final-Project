@@ -7,6 +7,7 @@ from textvqa_proj.config import load_settings
 from textvqa_proj.data.dataset import write_manifest
 from textvqa_proj.inference.runner import ExperimentRunner, load_samples_for_settings
 from textvqa_proj.models.registry import create_adapter
+from textvqa_proj.training.runner import run_training
 from textvqa_proj.utils.logging import configure_logging
 
 
@@ -37,6 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     evaluate = subparsers.add_parser("evaluate", help="Run resumable evaluation.")
     add_config_args(evaluate)
+
+    train = subparsers.add_parser("train", help="Run LoRA fine-tuning for supported backbones.")
+    add_config_args(train)
+    train.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate config, data loading, and output paths without loading model weights.",
+    )
 
     return parser
 
@@ -71,6 +80,11 @@ def main() -> None:
         adapter = create_adapter(settings.model.adapter, settings)
         metrics = ExperimentRunner(settings, adapter).run()
         print(metrics)
+        return
+
+    if args.command == "train":
+        summary = run_training(settings, dry_run=args.dry_run)
+        print(summary)
         return
 
     parser.error(f"Unhandled command: {args.command}")

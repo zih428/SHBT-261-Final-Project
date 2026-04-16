@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from textvqa_proj.config import Settings
+from textvqa_proj.data.dataset import load_huggingface_split, load_manifest
+from textvqa_proj.training.collators import (
+    SupervisedSampleDataset,
+    build_supervised_example,
+)
+from textvqa_proj.training.lora import build_peft_config
+from textvqa_proj.training.trainer import TrainingPaths, latest_checkpoint, write_trainer_state
+from textvqa_proj.utils.device import pick_device
+from textvqa_proj.utils.io import ensure_dir
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _resolve_manifest(settings: Settings, split: str) -> Path | None:
+    if split == settings.training.train_split and settings.data.train_manifest_path:
+        return Path(settings.data.train_manifest_path)
+    if split == settings.training.eval_split and settings.data.validation_manifest_path:
+        return Path(settings.data.validation_manifest_path)
+    if split == "validation" and settings.data.manifest_path:
+        return Path(settings.data.manifest_path)
+    return None
+
+
+def load_training_samples(
+    settings: Settings,
+    *,
+    split: str,
+    limit: int | None,
+) -> list[dict[str, object]]:
+    manifest_path = _resolve_manifest(settings, split)
+    if manifest_path and manifest_path.exists():
+        samples = load_manifest(manifest_path, limit=limit)
+    else:
+        samples = load_huggingface_split(
+            settings.data.hf_dataset_name,
+            split,
+            cache_dir=settings.data.hf_cache_dir,
+            limit=limit,
+        )
+    return [build_supervised_example(sample, settings.prompt) for sample in samples]
+
+
+def _build_training_summary(
+    settings: Settings,
+    train_rows: list[dict[str, object]],
+    eval_rows: list[dict[str, object]],
+    output_root: Path,
+    *,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "run_name": settings.run_name,
+        "experiment_name": settings.experiment.name,
+        "model_name": settings.model.model_name,
+        "adapter": settings.model.adapter,
+        "device": pick_device(settings.runtime.device_order),
+        "output_root": str(output_root),
+        "train_rows": len(train_rows),
+        "eval_rows": len(eval_rows),
+        "training": asdict(settings.training),
+        "lora": asdict(settings.lora),
+        "prompt_template": settings.prompt.template,
+    }
+
+
+class QwenSingleSampleLoraCollator:
+    def __init__(self, processor: Any) -> None:
+        try:
+            from qwen_vl_utils import process_vision_info
+        except ImportError as exc:
+            raise RuntimeError("qwen-vl-utils is required for Qwen LoRA training") from exc
+        self.processor = processor
+        self.process_vision_info = process_vision_info
+
+    def _encode(self, messages: list[dict[str, object]], *, add_generation_prompt: bool):
+        text = self.processor.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+        )
+        image_inputs, video_inputs = self.process_vision_info(messages)
+        return self.processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        )
+
+    def __call__(self, features: list[dict[str, object]]) -> dict[str, object]:
+        if len(features) != 1:
+            raise RuntimeError(
+                "The Qwen LoRA collator currently supports batch_size=1 only. "
+                "Scale with gradient accumulation on this machine."
+            )
+        feature = features[0]
+        system_text = str(feature["system"] or "")
+        user_content = [
+            {"type": "image", "image": str(feature["image"])},
+            {"type": "text", "text": str(feature["prompt"])},
+        ]
+        prompt_messages = []
+        if system_text:
+            prompt_messages.append(
+                {"role": "system", "content": [{"type": "text", "text": system_text}]}
+            )
+        prompt_messages.append({"role": "user", "content": user_content})
+
+        full_messages = list(prompt_messages)
+        full_messages.append(
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": str(feature["target"])}],
+            }
+        )
+
+        model_inputs = self._encode(full_messages, add_generation_prompt=False)
+        prompt_inputs = self._encode(prompt_messages, add_generation_prompt=True)
+        labels = model_inputs["input_ids"].clone()
+        prompt_token_count = int(prompt_inputs["attention_mask"][0].sum().item())
+        labels[:, :prompt_token_count] = -100
+        labels = labels.masked_fill(model_inputs["attention_mask"] == 0, -100)
+        batch = dict(model_inputs)
+        batch["labels"] = labels
+        return batch
+
+
+def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]:
+    output_root = Path(settings.training.output_root) / settings.experiment.name / settings.run_name
+    paths = TrainingPaths(ensure_dir(output_root))
+    train_rows = load_training_samples(
+        settings,
+        split=settings.training.train_split,
+        limit=settings.training.train_limit,
+    )
+    eval_rows = (
+        load_training_samples(
+            settings,
+            split=settings.training.eval_split,
+            limit=settings.training.eval_limit,
+        )
+        if settings.training.eval_split
+        else []
+    )
+    summary = _build_training_summary(
+        settings,
+        train_rows,
+        eval_rows,
+        output_root,
+        status="dry-run" if dry_run else "ready",
+    )
+
+    if settings.model.adapter != "qwen2_5_vl":
+        raise RuntimeError(
+            "The first training path is intentionally limited to the Qwen2.5-VL adapter. "
+            "Evaluation supports the broader backbone set already."
+        )
+
+    if dry_run:
+        write_trainer_state(paths, summary)
+        return summary
+
+    try:
+        import torch
+        from peft import get_peft_model
+        from transformers import (
+            AutoProcessor,
+            Qwen2_5_VLForConditionalGeneration,
+            Trainer,
+            TrainingArguments,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "transformers, accelerate, peft, and qwen-vl-utils are required for training"
+        ) from exc
+
+    if settings.training.per_device_train_batch_size != 1:
+        raise RuntimeError(
+            "Set per_device_train_batch_size=1 for the current Qwen LoRA path; "
+            "use gradient_accumulation_steps to scale effective batch size."
+        )
+
+    processor_kwargs: dict[str, object] = {}
+    if settings.model.min_pixels is not None:
+        processor_kwargs["min_pixels"] = settings.model.min_pixels
+    if settings.model.max_pixels is not None:
+        processor_kwargs["max_pixels"] = settings.model.max_pixels
+    processor = AutoProcessor.from_pretrained(
+        settings.model.processor_name or settings.model.model_name,
+        revision=settings.model.revision,
+        **processor_kwargs,
+    )
+
+    dtype = getattr(torch, settings.model.torch_dtype, torch.float16)
+    device = pick_device(settings.runtime.device_order)
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        settings.model.model_name,
+        revision=settings.model.revision,
+        torch_dtype=dtype,
+        trust_remote_code=settings.model.trust_remote_code,
+    )
+    model.to(device)
+    model.config.use_cache = False
+    if settings.training.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        model.enable_input_require_grads()
+
+    peft_config = build_peft_config(settings.model.adapter, settings.lora)
+    model = get_peft_model(model, peft_config)
+    collator = QwenSingleSampleLoraCollator(processor)
+    train_dataset = SupervisedSampleDataset(train_rows)
+    eval_dataset = SupervisedSampleDataset(eval_rows) if eval_rows else None
+
+    training_args = TrainingArguments(
+        output_dir=str(paths.checkpoints_dir),
+        remove_unused_columns=False,
+        per_device_train_batch_size=settings.training.per_device_train_batch_size,
+        per_device_eval_batch_size=settings.training.per_device_eval_batch_size,
+        gradient_accumulation_steps=settings.training.gradient_accumulation_steps,
+        num_train_epochs=settings.training.num_train_epochs,
+        learning_rate=settings.training.learning_rate,
+        weight_decay=settings.training.weight_decay,
+        warmup_ratio=settings.training.warmup_ratio,
+        logging_strategy="steps",
+        logging_steps=settings.training.logging_steps,
+        save_strategy="steps",
+        save_steps=settings.training.save_steps,
+        save_total_limit=settings.training.save_total_limit,
+        evaluation_strategy="steps" if eval_dataset is not None else "no",
+        eval_steps=settings.training.eval_steps if eval_dataset is not None else None,
+        dataloader_num_workers=settings.runtime.num_workers,
+        gradient_checkpointing=settings.training.gradient_checkpointing,
+        report_to=[],
+        use_mps_device=device == "mps",
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        data_collator=collator,
+    )
+
+    summary["status"] = "running"
+    write_trainer_state(paths, summary)
+    checkpoint = latest_checkpoint(paths)
+    trainer.train(resume_from_checkpoint=str(checkpoint) if checkpoint else None)
+    trainer.save_state()
+    model.save_pretrained(paths.adapter_dir)
+    processor.save_pretrained(paths.processor_dir)
+
+    summary["status"] = "completed"
+    write_trainer_state(paths, summary)
+    LOGGER.info("Saved LoRA adapter to %s", paths.adapter_dir)
+    return summary

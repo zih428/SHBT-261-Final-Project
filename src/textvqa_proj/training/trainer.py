@@ -12,7 +12,15 @@ class TrainingPaths:
 
     @property
     def checkpoints_dir(self) -> Path:
-        return ensure_dir(self.root / "checkpoints")
+        return ensure_dir(self.root)
+
+    @property
+    def adapter_dir(self) -> Path:
+        return ensure_dir(self.root / "adapter")
+
+    @property
+    def processor_dir(self) -> Path:
+        return ensure_dir(self.root / "processor")
 
     @property
     def state_path(self) -> Path:

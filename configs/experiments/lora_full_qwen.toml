@@ -1,0 +1,34 @@
+[experiment]
+name = "lora-full-qwen"
+run_name = "qwen-lora-full"
+resume = true
+
+[prompt]
+template = "ocr_injected"
+include_ocr = true
+normalize_ocr = false
+
+[training]
+output_root = "outputs/training"
+train_split = "train"
+eval_split = "validation"
+train_limit = 4096
+eval_limit = 256
+per_device_train_batch_size = 1
+per_device_eval_batch_size = 1
+gradient_accumulation_steps = 16
+num_train_epochs = 1.0
+learning_rate = 0.00015
+weight_decay = 0.0
+warmup_ratio = 0.03
+logging_steps = 10
+save_steps = 100
+eval_steps = 100
+save_total_limit = 3
+gradient_checkpointing = true
+
+[lora]
+rank = 16
+alpha = 32
+dropout = 0.05
+bias = "none"

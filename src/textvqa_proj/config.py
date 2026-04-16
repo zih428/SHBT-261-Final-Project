@@ -32,6 +32,8 @@ class DataSettings:
     hf_dataset_name: str = "lmms-lab/textvqa"
     hf_cache_dir: str = "data/cache/huggingface"
     manifest_path: str | None = None
+    train_manifest_path: str | None = None
+    validation_manifest_path: str | None = None
     image_root: str = ""
 
 
@@ -76,6 +78,36 @@ class ExperimentSettings:
 
 
 @dataclass(slots=True)
+class TrainingSettings:
+    output_root: str = "outputs/training"
+    train_split: str = "train"
+    eval_split: str | None = "validation"
+    train_limit: int | None = None
+    eval_limit: int | None = 128
+    per_device_train_batch_size: int = 1
+    per_device_eval_batch_size: int = 1
+    gradient_accumulation_steps: int = 8
+    num_train_epochs: float = 1.0
+    learning_rate: float = 2e-4
+    weight_decay: float = 0.0
+    warmup_ratio: float = 0.03
+    logging_steps: int = 10
+    save_steps: int = 50
+    eval_steps: int = 50
+    save_total_limit: int = 2
+    gradient_checkpointing: bool = True
+
+
+@dataclass(slots=True)
+class LoraSettings:
+    rank: int = 16
+    alpha: int = 32
+    dropout: float = 0.05
+    bias: str = "none"
+    target_modules: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class Settings:
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     data: DataSettings = field(default_factory=DataSettings)
@@ -83,6 +115,8 @@ class Settings:
     prompt: PromptSettings = field(default_factory=PromptSettings)
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     experiment: ExperimentSettings = field(default_factory=ExperimentSettings)
+    training: TrainingSettings = field(default_factory=TrainingSettings)
+    lora: LoraSettings = field(default_factory=LoraSettings)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,6 +134,8 @@ def _build_settings(raw: dict[str, Any]) -> Settings:
         prompt=PromptSettings(**raw.get("prompt", {})),
         generation=GenerationSettings(**raw.get("generation", {})),
         experiment=ExperimentSettings(**raw.get("experiment", {})),
+        training=TrainingSettings(**raw.get("training", {})),
+        lora=LoraSettings(**raw.get("lora", {})),
     )
 
 
