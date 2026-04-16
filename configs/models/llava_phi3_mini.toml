@@ -1,0 +1,7 @@
+[model]
+adapter = "llava_hf"
+model_name = "xtuner/llava-phi-3-mini-hf"
+processor_name = "xtuner/llava-phi-3-mini-hf"
+revision = "main"
+torch_dtype = "float16"
+trust_remote_code = false

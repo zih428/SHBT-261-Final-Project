@@ -1,0 +1,7 @@
+[model]
+adapter = "internvl2_5"
+model_name = "OpenGVLab/InternVL2_5-4B"
+processor_name = "OpenGVLab/InternVL2_5-4B"
+revision = "main"
+torch_dtype = "float16"
+trust_remote_code = true

@@ -9,7 +9,7 @@ Resumable, testable experimentation code for the SHBT 261 TextVQA final project.
 - Resumable evaluation runs with append-only prediction logs
 - TextVQA-oriented data utilities, prompt builders, metrics, and model adapters
 - Smoke tests that validate the core workflow without downloading large models
-- A committed zero-shot matrix with `4` prompt settings and `2` real backbones (`8` runnable real evals)
+- A committed zero-shot matrix with `4` prompt settings and `4` real backbones (`16` runnable real evals)
 
 ## Quick start
 
@@ -50,6 +50,8 @@ Real model configs:
 
 - `configs/models/qwen25_vl_3b.toml`
 - `configs/models/blip2_opt_2_7b.toml`
+- `configs/models/llava_phi3_mini.toml`
+- `configs/models/internvl2_5_4b.toml`
 
 Experiment configs:
 
@@ -58,10 +60,12 @@ Experiment configs:
 - `configs/experiments/zero_shot_ocr_copy_first.toml`
 - `configs/experiments/zero_shot_ocr_injected.toml`
 
-This yields `8` real zero-shot runs today:
+This yields `16` real zero-shot runs today:
 
 - `Qwen2.5-VL-3B` x `4` prompt settings
 - `BLIP-2 OPT-2.7B` x `4` prompt settings
+- `LLaVA-Phi-3-mini` x `4` prompt settings
+- `InternVL2.5-4B` x `4` prompt settings
 
 Example:
 
@@ -79,3 +83,4 @@ textvqa-proj evaluate \
 - Configs are layered and environment-agnostic.
 - The internal sample format is JSONL, which makes caching, auditing, and partial reruns simple.
 - Model-specific code is isolated behind adapters so new backbones can be added without touching the runner.
+- Backbones currently wired: Qwen2.5-VL, BLIP-2, LLaVA-Phi-3-mini (HF format), and InternVL2.5-4B.
