@@ -78,7 +78,7 @@ To see a one-shot overall progress summary without digging through `outputs/` ma
 .venv/bin/python scripts/progress_report.py
 ```
 
-Use `--json` if you want the raw machine-readable summary.
+Use `--json` if you want the raw machine-readable summary. The report follows the live queue state across screening, OCR baselines, finalist reruns, training, and appendix once those stages start.
 
 ## Experiment surface
 

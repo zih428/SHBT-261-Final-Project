@@ -92,6 +92,34 @@ def _summarize_statuses(runs: list[RunProgress]) -> dict[str, int]:
     }
 
 
+def _latest_screening_summary(repo_root: Path) -> dict[str, Any] | None:
+    log_root = repo_root / "outputs/logs/run_all"
+    if not log_root.exists():
+        return None
+    summaries = sorted(
+        log_root.glob("*/screening_summary.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for summary_path in summaries:
+        summary = _read_json(summary_path)
+        if summary:
+            return summary
+    return None
+
+
+def _stage_status(counts: dict[str, int]) -> str:
+    if counts["failed"] > 0:
+        return "failed"
+    if counts["running"] > 0:
+        return "running"
+    if counts["completed"] == counts["total"] and counts["total"] > 0:
+        return "completed"
+    if counts["completed"] > 0 and counts["pending"] > 0:
+        return "partially complete"
+    return "pending"
+
+
 def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     screening_runs = [
@@ -110,9 +138,25 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
         _evaluation_progress(repo_root, [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], appendix_config])
         for appendix_config in APPENDIX_CONFIGS
     ]
+    screening_counts = _summarize_statuses(screening_runs)
+    baseline_counts = _summarize_statuses(baseline_runs)
+    training_counts = _summarize_statuses(training_runs)
+    appendix_counts = _summarize_statuses(appendix_runs)
+
+    screening_summary = _latest_screening_summary(repo_root) or {}
+    finalist_specs = screening_summary.get("finalist_specs", [])
+    finalist_runs = [
+        _evaluation_progress(
+            repo_root,
+            [*COMMON_CONFIGS, Path(spec["model_config"]), Path(spec["experiment_config"])],
+        )
+        for spec in finalist_specs
+    ]
+    finalist_counts = _summarize_statuses(finalist_runs)
 
     active_screening = next((run for run in screening_runs if run.status == "running"), None)
     completed_screening = [run for run in screening_runs if run.status == "completed"]
+    active_finalist = next((run for run in finalist_runs if run.status == "running"), None)
     best_completed = max(
         completed_screening,
         key=lambda run: run.accuracy if run.accuracy is not None else float("-inf"),
@@ -135,24 +179,42 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
             "validation_external_ocr_rows": validation_ocr_count,
         },
         "screening": {
-            "counts": _summarize_statuses(screening_runs),
+            "counts": screening_counts,
             "active_run": asdict(active_screening) if active_screening else None,
             "best_completed_run": asdict(best_completed) if best_completed else None,
         },
         "screening_baseline": {
-            "counts": _summarize_statuses(baseline_runs),
+            "counts": baseline_counts,
         },
         "finalists": {
-            "status": "blocked until screening completes",
-            "planned_runs": 8,
+            "counts": finalist_counts,
+            "active_run": asdict(active_finalist) if active_finalist else None,
+            "planned_runs": len(finalist_runs) or 8,
+            "status": (
+                _stage_status(finalist_counts)
+                if finalist_runs
+                else (
+                    "blocked until screening completes"
+                    if screening_counts["completed"] < screening_counts["total"]
+                    else "selection pending"
+                )
+            ),
         },
         "training": {
-            "counts": _summarize_statuses(training_runs),
-            "status": "blocked until screening/finalist selection completes",
+            "counts": training_counts,
+            "status": (
+                _stage_status(training_counts)
+                if any(run.status != "pending" for run in training_runs)
+                else "blocked until finalist selection completes"
+            ),
         },
         "appendix": {
-            "counts": _summarize_statuses(appendix_runs),
-            "status": "blocked until winner backbone is selected",
+            "counts": appendix_counts,
+            "status": (
+                _stage_status(appendix_counts)
+                if any(run.status != "pending" for run in appendix_runs)
+                else "blocked until winner backbone is selected"
+            ),
         },
     }
 
@@ -160,6 +222,7 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
 def render_progress_report(summary: dict[str, Any]) -> str:
     screening = summary["screening"]
     baseline = summary["screening_baseline"]
+    finalists = summary["finalists"]
     training = summary["training"]
     appendix = summary["appendix"]
     prep = summary["prep"]
@@ -202,9 +265,14 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         [
             "",
             "Next Stages",
-            "- Finalists: "
-            f"{summary['finalists']['status']} "
-            f"({summary['finalists']['planned_runs']} runs once promoted)",
+            (
+                "- Finalists: "
+                f"{finalists['counts']['completed']} completed, "
+                f"{finalists['counts']['running']} running, "
+                f"{finalists['counts']['pending']} pending "
+                f"(total {finalists['counts']['total'] or finalists['planned_runs']}); "
+                f"{finalists['status']}"
+            ),
             (
                 "- Training: "
                 f"{training['counts']['completed']} completed, "
@@ -221,4 +289,12 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             ),
         ]
     )
+    finalist_active = finalists.get("active_run")
+    if finalist_active:
+        lines.insert(
+            lines.index("Next Stages") + 2,
+            "- Active finalist run: "
+            f"{finalist_active['label']} "
+            f"({finalist_active['processed_count']} processed, updated {finalist_active['updated_at']})",
+        )
     return "\n".join(lines)
