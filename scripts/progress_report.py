@@ -12,6 +12,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from textvqa_proj.progress import render_progress_report, summarize_project_progress
+from textvqa_proj.utils.io import json_default
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +29,7 @@ def main() -> None:
     args = parse_args()
     summary = summarize_project_progress(REPO_ROOT)
     if args.json:
-        print(json.dumps(summary, indent=2, sort_keys=True))
+        print(json.dumps(summary, indent=2, sort_keys=True, default=json_default))
         return
     print(render_progress_report(summary))
 
