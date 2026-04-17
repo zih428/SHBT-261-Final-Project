@@ -7,6 +7,7 @@ resume = true
 template = "ocr_injected"
 include_ocr = true
 normalize_ocr = false
+max_ocr_tokens = 32
 
 [training]
 output_root = "outputs/training"

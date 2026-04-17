@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from textvqa_proj.config import load_settings
 from textvqa_proj.orchestration import (
     EvaluationResult,
     evaluation_completed,
@@ -36,7 +37,18 @@ REAL_MODEL_CONFIGS = [
 ]
 OCR_BASELINE_CONFIG = REPO_ROOT / "configs/models/ocr_lexical.toml"
 QWEN_MODEL_CONFIG = REPO_ROOT / "configs/models/qwen25_vl_3b.toml"
-SCREENING_CONFIGS = sorted((REPO_ROOT / "configs/experiments/screening").glob("*.toml"))
+SCREENING_ORDER = [
+    "plain",
+    "short_answer",
+    "ocr_copy_first",
+    "ocr_injected",
+    "ocr_injected_normalized",
+    "ocr_fused",
+]
+SCREENING_CONFIGS = [
+    REPO_ROOT / "configs/experiments/screening" / f"{name}.toml"
+    for name in SCREENING_ORDER
+]
 FINALIST_DIR = REPO_ROOT / "configs/experiments/finalists"
 TRAINING_CONFIGS = sorted((REPO_ROOT / "configs/experiments/training").glob("*.toml"))
 APPENDIX_CONFIGS = sorted((REPO_ROOT / "configs/experiments/appendix").glob("*.toml"))
@@ -93,6 +105,7 @@ def run_command(
     env.setdefault("TEXTVQA_OFFLINE", "1")
     env.setdefault("HF_HUB_OFFLINE", "1")
     env.setdefault("TRANSFORMERS_OFFLINE", "1")
+    env.setdefault("TOKENIZERS_PARALLELISM", "false")
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(f"$ {' '.join(command)}\n")
         handle.flush()
@@ -104,6 +117,47 @@ def run_command(
             stderr=subprocess.STDOUT,
             check=True,
         )
+
+
+def _iter_hf_repos() -> list[tuple[str, str]]:
+    repos: list[tuple[str, str]] = []
+    for model_config in REAL_MODEL_CONFIGS:
+        settings = load_settings([*COMMON_CONFIGS, model_config])
+        repos.append((settings.model.model_name, settings.model.revision))
+        if settings.model.processor_name:
+            repos.append((settings.model.processor_name, settings.model.revision))
+    deduped: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for repo_id, revision in repos:
+        key = (repo_id, revision)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return deduped
+
+
+def ensure_model_cache(log_root: Path, *, dry_run: bool) -> None:
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub is required to prewarm model caches for offline execution."
+        ) from exc
+
+    for repo_id, revision in _iter_hf_repos():
+        label = f"cache-{repo_id.rsplit('/', maxsplit=1)[-1]}".replace(".", "-").replace("_", "-")
+        print(f"[warm] {repo_id}@{revision}")
+        if dry_run:
+            continue
+        log_path = log_root / f"{label}.log"
+        ensure_dir(log_path.parent)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"$ snapshot_download {repo_id} --revision {revision}\n")
+            handle.flush()
+            path = snapshot_download(repo_id=repo_id, revision=revision)
+            handle.write(f"{path}\n")
+            handle.flush()
 
 
 def ensure_manifests(log_root: Path, *, dry_run: bool) -> None:
@@ -268,6 +322,7 @@ def main() -> None:
     log_root = resolve_repo_path(REPO_ROOT, args.log_root) / now_stamp()
     ensure_dir(log_root)
 
+    ensure_model_cache(log_root, dry_run=args.dry_run)
     ensure_manifests(log_root, dry_run=args.dry_run)
 
     screening_results = run_evaluations(

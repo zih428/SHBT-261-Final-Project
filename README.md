@@ -70,7 +70,7 @@ To launch the full queue end to end:
 ```
 
 The orchestration script performs prep, runs the `24` screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
-It launches subprocesses in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
+Before launching the offline queue, it now proactively warms every committed HF repo into the local cache. Subprocesses then run in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
 
 To see a one-shot overall progress summary without digging through `outputs/` manually:
 
@@ -189,6 +189,8 @@ Each training run saves:
 - Training resumes from the latest `checkpoint-*` directory if a run directory already exists.
 - External OCR sidecar generation resumes by re-reading the existing output JSONL and skipping completed sample IDs.
 - Output directories are namespaced by model slug plus run name to avoid collisions across the experiment matrix.
+- `runtime.run_tag` is included in the output directory name, which makes it safe to relaunch the full matrix under a new tuned protocol without mixing old and new results.
+- Existing run directories now reject settings mismatches instead of silently appending incompatible outputs.
 - External/fused OCR configs fail fast if the required OCR sidecar manifest is missing.
 - The batch runner writes screening and finalist promotion summaries to `outputs/logs/run_all/<timestamp>/` so the chosen finalists and winning evaluation backbone are recorded for later write-up.
 - Optional semantic metrics degrade gracefully if NLTK corpora such as `wordnet` are absent, so experiment runs do not crash after prediction generation.
@@ -197,5 +199,8 @@ Each training run saves:
 ## Notes
 
 - The main fine-tuning path remains intentionally Qwen-first because it is the most realistic LoRA target on this Apple Silicon machine.
+- The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, and LLaVA run most reliably at evaluation batch size `1`, while InternVL benefits from `2`.
+- OCR-heavy prompt variants are capped at `32` OCR tokens in the committed configs to control prompt growth without changing the experiment families.
+- Adapters unload weights between runs and the runner backs off automatically if a larger batch hits OOM, which is safer than trying to keep multiple large VLMs resident in unified memory at once.
 - The finalist validation stage is set up as reusable validation configs rather than hard-coding the eventual top `8` before screening results exist.
 - `python -m textvqa_proj.cli ...` is the stable invocation path inside this repo-local `.venv` and is what the batch runner uses as well.

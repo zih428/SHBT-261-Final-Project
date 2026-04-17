@@ -12,6 +12,7 @@ template = "ocr_injected_normalized"
 include_ocr = true
 normalize_ocr = true
 ocr_source = "dataset"
+max_ocr_tokens = 32
 
 [generation]
 max_new_tokens = 4

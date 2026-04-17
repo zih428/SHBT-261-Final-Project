@@ -8,6 +8,17 @@ from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.prompting.builders import PromptBundle
 
 
+def build_generation_kwargs(generation: GenerationSettings) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "max_new_tokens": generation.max_new_tokens,
+        "do_sample": generation.do_sample,
+    }
+    if generation.do_sample:
+        kwargs["temperature"] = generation.temperature
+        kwargs["top_p"] = generation.top_p
+    return kwargs
+
+
 class BaseModelAdapter(ABC):
     adapter_name = "base"
 

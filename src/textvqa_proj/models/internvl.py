@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from textvqa_proj.config import GenerationSettings
 from textvqa_proj.data.dataset import TextVQASample
-from textvqa_proj.models.base import BaseModelAdapter
+from textvqa_proj.models.base import BaseModelAdapter, build_generation_kwargs
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
 from textvqa_proj.utils.hf import local_files_only
 from textvqa_proj.utils.io import load_image
+from textvqa_proj.utils.perf import release_torch_cache
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -93,8 +95,11 @@ class InternVL25Adapter(BaseModelAdapter):
         self._dtype = None
         self._model = None
         self._tokenizer = None
-        self._input_size = 448
-        self._max_num = 12
+        self._input_size = settings.model.image_size or 448
+        self._max_num = settings.model.max_image_tiles or 12
+        self._use_thumbnail = (
+            True if settings.model.use_thumbnail is None else settings.model.use_thumbnail
+        )
 
     def load(self) -> None:
         if self._model is not None:
@@ -102,15 +107,18 @@ class InternVL25Adapter(BaseModelAdapter):
         try:
             import torch
             from transformers import AutoModel, AutoTokenizer
+            from transformers.modeling_utils import PreTrainedModel
         except ImportError as exc:
             raise RuntimeError("transformers is required for the InternVL adapter") from exc
+
+        if not hasattr(PreTrainedModel, "all_tied_weights_keys"):
+            PreTrainedModel.all_tied_weights_keys = {}  # type: ignore[attr-defined]
 
         self._dtype = getattr(torch, self.settings.model.torch_dtype, torch.float16)
         self._model = AutoModel.from_pretrained(
             self.settings.model.model_name,
             revision=self.settings.model.revision,
             torch_dtype=self._dtype,
-            low_cpu_mem_usage=True,
             trust_remote_code=self.settings.model.trust_remote_code,
             local_files_only=local_files_only(self.settings),
         ).eval()
@@ -120,8 +128,15 @@ class InternVL25Adapter(BaseModelAdapter):
             revision=self.settings.model.revision,
             trust_remote_code=self.settings.model.trust_remote_code,
             use_fast=False,
+            fix_mistral_regex=True,
             local_files_only=local_files_only(self.settings),
         )
+
+    def unload(self) -> None:
+        self._model = None
+        self._tokenizer = None
+        self._dtype = None
+        release_torch_cache()
 
     def _build_pixel_values(self, image_source: str):
         import numpy as np
@@ -132,7 +147,7 @@ class InternVL25Adapter(BaseModelAdapter):
             image,
             image_size=self._input_size,
             max_num=self._max_num,
-            use_thumbnail=True,
+            use_thumbnail=self._use_thumbnail,
         )
         pixel_values = []
         mean = np.asarray(IMAGENET_MEAN, dtype=np.float32)
@@ -145,28 +160,51 @@ class InternVL25Adapter(BaseModelAdapter):
         stacked = torch.stack(pixel_values).to(self._device, dtype=self._dtype)
         return stacked
 
+    def generate_batch(
+        self,
+        samples: Sequence[TextVQASample],
+        prompts: Sequence[PromptBundle],
+        generation: GenerationSettings,
+    ) -> list[str]:
+        self.load()
+        assert self._model is not None
+        assert self._tokenizer is not None
+
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError("torch is required for the InternVL adapter") from exc
+
+        pixel_value_chunks = [self._build_pixel_values(sample.image) for sample in samples]
+        num_patches_list = [chunk.size(0) for chunk in pixel_value_chunks]
+        pixel_values = torch.cat(pixel_value_chunks, dim=0)
+        questions = [f"<image>\n{prompt.user_message}" for prompt in prompts]
+        generation_config = build_generation_kwargs(generation)
+        with torch.inference_mode():
+            if hasattr(self._model, "batch_chat"):
+                responses = self._model.batch_chat(
+                    self._tokenizer,
+                    pixel_values,
+                    num_patches_list=num_patches_list,
+                    questions=questions,
+                    generation_config=generation_config,
+                )
+            else:
+                responses = [
+                    self._model.chat(
+                        self._tokenizer,
+                        chunk,
+                        question,
+                        generation_config,
+                    )
+                    for chunk, question in zip(pixel_value_chunks, questions, strict=True)
+                ]
+        return [response if isinstance(response, str) else response[0] for response in responses]
+
     def generate_one(
         self,
         sample: TextVQASample,
         prompt: PromptBundle,
         generation: GenerationSettings,
     ) -> str:
-        self.load()
-        assert self._model is not None
-        assert self._tokenizer is not None
-
-        pixel_values = self._build_pixel_values(sample.image)
-        question = f"<image>\n{prompt.user_message}"
-        generation_config = {
-            "max_new_tokens": generation.max_new_tokens,
-            "do_sample": generation.do_sample,
-            "temperature": generation.temperature,
-            "top_p": generation.top_p,
-        }
-        response = self._model.chat(
-            self._tokenizer,
-            pixel_values,
-            question,
-            generation_config,
-        )
-        return response if isinstance(response, str) else response[0]
+        return self.generate_batch([sample], [prompt], generation)[0]

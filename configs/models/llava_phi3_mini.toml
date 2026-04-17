@@ -5,3 +5,5 @@ processor_name = "xtuner/llava-phi-3-mini-hf"
 revision = "main"
 torch_dtype = "float16"
 trust_remote_code = false
+local_files_only = true
+eval_batch_size = 1

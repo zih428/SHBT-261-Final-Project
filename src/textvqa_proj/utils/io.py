@@ -67,9 +67,11 @@ def append_jsonl(path: Path, record: Any) -> None:
 
 def load_image(source: str | Path) -> Image.Image:
     if isinstance(source, Path):
-        return Image.open(source).convert("RGB")
+        with Image.open(source) as image:
+            return image.convert("RGB")
     parsed = urlparse(source)
     if parsed.scheme in {"http", "https"}:
-        with urlopen(source) as response:
-            return Image.open(response).convert("RGB")
-    return Image.open(Path(source)).convert("RGB")
+        with urlopen(source) as response, Image.open(response) as image:
+            return image.convert("RGB")
+    with Image.open(Path(source)) as image:
+        return image.convert("RGB")

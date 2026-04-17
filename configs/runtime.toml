@@ -4,5 +4,5 @@ log_level = "INFO"
 output_root = "outputs/runs"
 cache_root = "data/cache"
 device_order = ["mps", "cuda", "cpu"]
-num_workers = 2
-
+num_workers = 4
+run_tag = "mps-tuned-v1"

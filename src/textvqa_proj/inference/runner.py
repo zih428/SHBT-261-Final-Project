@@ -19,6 +19,7 @@ from textvqa_proj.inference.run_store import PredictionRecord, RunStore
 from textvqa_proj.models.base import BaseModelAdapter
 from textvqa_proj.prompting.builders import build_prompt
 from textvqa_proj.utils.io import ensure_dir
+from textvqa_proj.utils.perf import is_oom_error, release_torch_cache
 from textvqa_proj.utils.profiling import time_block
 
 LOGGER = logging.getLogger(__name__)
@@ -99,6 +100,45 @@ class ExperimentRunner:
             settings,
         )
 
+    def _generate_prediction_records(
+        self,
+        batch: list[TextVQASample],
+        prompts: list,
+    ) -> list[tuple[TextVQASample, object, str, float]]:
+        try:
+            with time_block() as timing:
+                raw_predictions = self.adapter.generate_batch(
+                    batch,
+                    prompts,
+                    self.settings.generation,
+                )
+        except RuntimeError as exc:
+            if len(batch) == 1 or not is_oom_error(exc):
+                raise
+            midpoint = len(batch) // 2
+            LOGGER.warning(
+                "Batch size %s hit OOM for %s; retrying with %s and %s",
+                len(batch),
+                self.settings.model.model_name,
+                midpoint,
+                len(batch) - midpoint,
+            )
+            release_torch_cache()
+            return [
+                *self._generate_prediction_records(batch[:midpoint], prompts[:midpoint]),
+                *self._generate_prediction_records(batch[midpoint:], prompts[midpoint:]),
+            ]
+        latency = timing["elapsed_seconds"] / max(len(batch), 1)
+        return [
+            (sample, prompt, raw_prediction, latency)
+            for sample, prompt, raw_prediction in zip(
+                batch,
+                prompts,
+                raw_predictions,
+                strict=True,
+            )
+        ]
+
     def run(self) -> dict[str, object]:
         samples = load_samples_for_settings(self.settings)
         samples_by_id = {sample.sample_id: sample for sample in samples}
@@ -116,18 +156,12 @@ class ExperimentRunner:
         if pending_samples:
             self.adapter.load()
             try:
-                batch_size = max(1, self.settings.experiment.batch_size)
+                batch_size = self.settings.eval_batch_size
                 for start in range(0, len(pending_samples), batch_size):
                     batch = pending_samples[start : start + batch_size]
                     prompts = [build_prompt(sample, self.settings.prompt) for sample in batch]
-                    with time_block() as timing:
-                        raw_predictions = self.adapter.generate_batch(
-                            batch, prompts, self.settings.generation
-                        )
-                    latency = timing["elapsed_seconds"] / max(len(batch), 1)
-                    for sample, prompt, raw_prediction in zip(
-                        batch, prompts, raw_predictions, strict=True
-                    ):
+                    prediction_records = self._generate_prediction_records(batch, prompts)
+                    for sample, prompt, raw_prediction, latency in prediction_records:
                         cleaned_prediction, normalized_prediction = clean_and_normalize_prediction(
                             raw_prediction
                         )
@@ -146,6 +180,10 @@ class ExperimentRunner:
                             latency_seconds=latency,
                             metadata={
                                 "ocr_token_count": len(sample.ocr_tokens),
+                                "selected_ocr_token_count": prompt.metadata.get(
+                                    "selected_ocr_token_count", 0
+                                ),
+                                "ocr_source": prompt.metadata.get("ocr_source"),
                                 "split": sample.split,
                                 "question_id": sample.question_id,
                             },

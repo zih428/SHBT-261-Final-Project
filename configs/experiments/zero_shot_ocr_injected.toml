@@ -12,6 +12,7 @@ include_semantic_metrics = true
 template = "ocr_injected"
 include_ocr = true
 normalize_ocr = false
+max_ocr_tokens = 32
 
 [generation]
 max_new_tokens = 8

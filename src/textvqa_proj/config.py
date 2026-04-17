@@ -26,6 +26,7 @@ class RuntimeSettings:
     cache_root: str = "data/cache"
     device_order: list[str] = field(default_factory=lambda: ["mps", "cuda", "cpu"])
     num_workers: int = 2
+    run_tag: str | None = None
 
 
 @dataclass(slots=True)
@@ -53,6 +54,10 @@ class ModelSettings:
     local_files_only: bool = False
     min_pixels: int | None = None
     max_pixels: int | None = None
+    eval_batch_size: int | None = None
+    image_size: int | None = None
+    max_image_tiles: int | None = None
+    use_thumbnail: bool | None = None
 
 
 @dataclass(slots=True)
@@ -143,11 +148,21 @@ class Settings:
         base = re.sub(r"[^a-z0-9]+", "-", self.run_name.casefold()).strip("-")
         if not base:
             base = "run"
-        if self.model.adapter == "fake":
-            return base
-        if base.startswith(f"{self.model_slug}-"):
-            return base
-        return f"{self.model_slug}-{base}"
+        if self.model.adapter == "fake" or base.startswith(f"{self.model_slug}-"):
+            run_dir = base
+        else:
+            run_dir = f"{self.model_slug}-{base}"
+        if self.runtime.run_tag:
+            tag = re.sub(r"[^a-z0-9]+", "-", self.runtime.run_tag.casefold()).strip("-")
+            if tag:
+                return f"{run_dir}-{tag}"
+        return run_dir
+
+    @property
+    def eval_batch_size(self) -> int:
+        if self.model.eval_batch_size is not None:
+            return max(1, self.model.eval_batch_size)
+        return max(1, self.experiment.batch_size)
 
 
 def _build_settings(raw: dict[str, Any]) -> Settings:

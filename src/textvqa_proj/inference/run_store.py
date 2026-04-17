@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,8 +77,16 @@ class RunStore:
         self._write_settings_snapshot()
 
     def _write_settings_snapshot(self) -> None:
+        current_settings = self.settings.to_dict()
         if not self.settings_path.exists():
-            atomic_write_json(self.settings_path, self.settings.to_dict())
+            atomic_write_json(self.settings_path, current_settings)
+            return
+        existing_settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        if existing_settings != current_settings:
+            raise RuntimeError(
+                f"Run directory {self.root} already exists with different settings. "
+                "Use a new run_name or runtime.run_tag to keep protocols separate."
+            )
 
     def load_completed_ids(self) -> set[str]:
         return set(self._completed_ids)

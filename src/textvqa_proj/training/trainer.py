@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,7 +39,15 @@ def write_trainer_state(paths: TrainingPaths, payload: dict[str, object]) -> Non
 
 def write_training_settings(paths: TrainingPaths, payload: dict[str, object]) -> None:
     ensure_dir(paths.root)
-    atomic_write_json(paths.settings_path, payload)
+    if not paths.settings_path.exists():
+        atomic_write_json(paths.settings_path, payload)
+        return
+    existing_payload = json.loads(paths.settings_path.read_text(encoding="utf-8"))
+    if existing_payload != payload:
+        raise RuntimeError(
+            f"Training directory {paths.root} already exists with different settings. "
+            "Use a new run_name or runtime.run_tag to separate protocols."
+        )
 
 
 def latest_checkpoint(paths: TrainingPaths) -> Path | None:

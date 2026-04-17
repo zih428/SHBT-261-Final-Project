@@ -15,6 +15,7 @@ template = "ocr_fused"
 include_ocr = true
 normalize_ocr = true
 ocr_source = "fused"
+max_ocr_tokens = 32
 
 [generation]
 max_new_tokens = 8

@@ -5,4 +5,5 @@ processor_name = "Salesforce/blip2-opt-2.7b"
 revision = "main"
 torch_dtype = "float16"
 trust_remote_code = false
-
+local_files_only = true
+eval_batch_size = 1
