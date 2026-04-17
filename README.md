@@ -72,6 +72,14 @@ To launch the full queue end to end:
 The orchestration script performs prep, runs the `24` screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
 It launches subprocesses in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
 
+To see a one-shot overall progress summary without digging through `outputs/` manually:
+
+```bash
+.venv/bin/python scripts/progress_report.py
+```
+
+Use `--json` if you want the raw machine-readable summary.
+
 ## Experiment surface
 
 Real model configs:
