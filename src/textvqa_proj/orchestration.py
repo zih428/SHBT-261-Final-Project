@@ -84,7 +84,7 @@ def training_completed(repo_root: Path, config_paths: list[Path]) -> bool:
     settings = load_settings(config_paths)
     run_root = training_run_root(repo_root, settings)
     trainer_state = load_json(run_root / "trainer_state.json")
-    return trainer_state is not None and trainer_state.get("status") in {"completed", "failed"}
+    return trainer_state is not None and trainer_state.get("status") == "completed"
 
 
 def select_top_backbones(
