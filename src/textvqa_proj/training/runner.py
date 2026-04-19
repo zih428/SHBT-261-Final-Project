@@ -192,6 +192,8 @@ def _build_training_arguments_kwargs(
     device: str,
     accepted_names: set[str],
 ) -> dict[str, object]:
+    safe_num_workers = dataloader_num_workers if device != "cpu" else 0
+    pin_memory = device != "cpu"
     kwargs: dict[str, object] = {
         "output_dir": output_dir,
         "remove_unused_columns": False,
@@ -208,11 +210,15 @@ def _build_training_arguments_kwargs(
         "save_steps": settings.training.save_steps,
         "save_total_limit": settings.training.save_total_limit,
         "eval_steps": settings.training.eval_steps if has_eval else None,
-        "dataloader_num_workers": dataloader_num_workers,
+        "dataloader_num_workers": safe_num_workers,
         "gradient_checkpointing": settings.training.gradient_checkpointing,
         "report_to": [],
         "seed": settings.runtime.seed,
     }
+    if "dataloader_pin_memory" in accepted_names:
+        kwargs["dataloader_pin_memory"] = pin_memory
+    if "dataloader_persistent_workers" in accepted_names:
+        kwargs["dataloader_persistent_workers"] = safe_num_workers > 0
     if "evaluation_strategy" in accepted_names:
         kwargs["evaluation_strategy"] = "steps" if has_eval else "no"
     if "eval_strategy" in accepted_names:

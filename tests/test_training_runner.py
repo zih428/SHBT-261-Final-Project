@@ -15,12 +15,16 @@ def test_training_arguments_kwargs_supports_legacy_trainingarguments() -> None:
             "output_dir",
             "evaluation_strategy",
             "use_mps_device",
+            "dataloader_pin_memory",
+            "dataloader_persistent_workers",
         },
     )
 
     assert kwargs["evaluation_strategy"] == "steps"
     assert "eval_strategy" not in kwargs
     assert kwargs["use_mps_device"] is True
+    assert kwargs["dataloader_pin_memory"] is True
+    assert kwargs["dataloader_persistent_workers"] is True
 
 
 def test_training_arguments_kwargs_supports_modern_trainingarguments() -> None:
@@ -35,9 +39,35 @@ def test_training_arguments_kwargs_supports_modern_trainingarguments() -> None:
         accepted_names={
             "output_dir",
             "eval_strategy",
+            "dataloader_pin_memory",
+            "dataloader_persistent_workers",
         },
     )
 
     assert kwargs["eval_strategy"] == "no"
     assert "evaluation_strategy" not in kwargs
     assert "use_mps_device" not in kwargs
+    assert kwargs["dataloader_pin_memory"] is True
+    assert kwargs["dataloader_persistent_workers"] is True
+
+
+def test_training_arguments_kwargs_forces_safe_cpu_dataloader_settings() -> None:
+    settings = Settings()
+
+    kwargs = _build_training_arguments_kwargs(
+        settings,
+        output_dir="out",
+        has_eval=True,
+        dataloader_num_workers=4,
+        device="cpu",
+        accepted_names={
+            "output_dir",
+            "eval_strategy",
+            "dataloader_pin_memory",
+            "dataloader_persistent_workers",
+        },
+    )
+
+    assert kwargs["dataloader_num_workers"] == 0
+    assert kwargs["dataloader_pin_memory"] is False
+    assert kwargs["dataloader_persistent_workers"] is False
