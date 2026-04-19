@@ -183,6 +183,24 @@ class QwenSingleSampleLoraCollator:
         return batch
 
 
+def _resolve_cpu_safe_training_runtime(
+    *,
+    torch_module: Any,
+    device: str,
+    requested_dtype: object,
+    gradient_checkpointing: bool,
+) -> tuple[object, bool]:
+    dtype = requested_dtype
+    effective_gradient_checkpointing = gradient_checkpointing
+    if device != "cpu":
+        return dtype, effective_gradient_checkpointing
+    if dtype is getattr(torch_module, "float16", None):
+        dtype = torch_module.float32
+    if effective_gradient_checkpointing:
+        effective_gradient_checkpointing = False
+    return dtype, effective_gradient_checkpointing
+
+
 def _build_training_arguments_kwargs(
     settings: Settings,
     *,
@@ -190,6 +208,7 @@ def _build_training_arguments_kwargs(
     has_eval: bool,
     dataloader_num_workers: int,
     device: str,
+    gradient_checkpointing: bool | None = None,
     accepted_names: set[str],
 ) -> dict[str, object]:
     safe_num_workers = dataloader_num_workers if device != "cpu" else 0
@@ -211,7 +230,11 @@ def _build_training_arguments_kwargs(
         "save_total_limit": settings.training.save_total_limit,
         "eval_steps": settings.training.eval_steps if has_eval else None,
         "dataloader_num_workers": safe_num_workers,
-        "gradient_checkpointing": settings.training.gradient_checkpointing,
+        "gradient_checkpointing": (
+            settings.training.gradient_checkpointing
+            if gradient_checkpointing is None
+            else gradient_checkpointing
+        ),
         "report_to": [],
         "seed": settings.runtime.seed,
     }
@@ -219,6 +242,8 @@ def _build_training_arguments_kwargs(
         kwargs["dataloader_pin_memory"] = pin_memory
     if "dataloader_persistent_workers" in accepted_names:
         kwargs["dataloader_persistent_workers"] = safe_num_workers > 0
+    if "use_cpu" in accepted_names:
+        kwargs["use_cpu"] = device == "cpu"
     if "evaluation_strategy" in accepted_names:
         kwargs["evaluation_strategy"] = "steps" if has_eval else "no"
     if "eval_strategy" in accepted_names:
@@ -303,8 +328,27 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         **processor_kwargs,
     )
 
-    dtype = getattr(torch, settings.model.torch_dtype, torch.float16)
     device = pick_device(settings.runtime.device_order)
+    requested_dtype = getattr(torch, settings.model.torch_dtype, torch.float16)
+    dtype, effective_gradient_checkpointing = _resolve_cpu_safe_training_runtime(
+        torch_module=torch,
+        device=device,
+        requested_dtype=requested_dtype,
+        gradient_checkpointing=settings.training.gradient_checkpointing,
+    )
+    if device == "cpu" and dtype is not requested_dtype:
+        LOGGER.warning(
+            "CPU fallback detected; overriding torch_dtype from %s to float32.",
+            settings.model.torch_dtype,
+        )
+    if (
+        device == "cpu"
+        and settings.training.gradient_checkpointing
+        and not effective_gradient_checkpointing
+    ):
+        LOGGER.warning(
+            "CPU fallback detected; disabling gradient checkpointing to avoid severe slowdown."
+        )
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         settings.model.model_name,
         revision=settings.model.revision,
@@ -314,7 +358,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
     )
     model.to(device)
     model.config.use_cache = False
-    if settings.training.gradient_checkpointing:
+    if effective_gradient_checkpointing:
         model.gradient_checkpointing_enable()
         model.enable_input_require_grads()
 
@@ -334,6 +378,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
             has_eval=eval_dataset is not None,
             dataloader_num_workers=settings.runtime.num_workers,
             device=device,
+            gradient_checkpointing=effective_gradient_checkpointing,
             accepted_names=accepted_training_argument_names,
         )
     )
@@ -349,10 +394,16 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
     summary["status"] = "running"
     write_trainer_state(paths, summary)
     checkpoint = latest_checkpoint(paths)
-    trainer.train(resume_from_checkpoint=str(checkpoint) if checkpoint else None)
-    trainer.save_state()
-    model.save_pretrained(paths.adapter_dir)
-    processor.save_pretrained(paths.processor_dir)
+    try:
+        trainer.train(resume_from_checkpoint=str(checkpoint) if checkpoint else None)
+        trainer.save_state()
+        model.save_pretrained(paths.adapter_dir)
+        processor.save_pretrained(paths.processor_dir)
+    except Exception as exc:
+        summary["status"] = "failed"
+        summary["error"] = f"{type(exc).__name__}: {exc}"
+        write_trainer_state(paths, summary)
+        raise
 
     summary["status"] = "completed"
     write_trainer_state(paths, summary)
