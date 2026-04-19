@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import asdict
 from pathlib import Path
@@ -182,6 +183,47 @@ class QwenSingleSampleLoraCollator:
         return batch
 
 
+def _build_training_arguments_kwargs(
+    settings: Settings,
+    *,
+    output_dir: str,
+    has_eval: bool,
+    dataloader_num_workers: int,
+    device: str,
+    accepted_names: set[str],
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "output_dir": output_dir,
+        "remove_unused_columns": False,
+        "per_device_train_batch_size": settings.training.per_device_train_batch_size,
+        "per_device_eval_batch_size": settings.training.per_device_eval_batch_size,
+        "gradient_accumulation_steps": settings.training.gradient_accumulation_steps,
+        "num_train_epochs": settings.training.num_train_epochs,
+        "learning_rate": settings.training.learning_rate,
+        "weight_decay": settings.training.weight_decay,
+        "warmup_ratio": settings.training.warmup_ratio,
+        "logging_strategy": "steps",
+        "logging_steps": settings.training.logging_steps,
+        "save_strategy": "steps",
+        "save_steps": settings.training.save_steps,
+        "save_total_limit": settings.training.save_total_limit,
+        "eval_steps": settings.training.eval_steps if has_eval else None,
+        "dataloader_num_workers": dataloader_num_workers,
+        "gradient_checkpointing": settings.training.gradient_checkpointing,
+        "report_to": [],
+        "seed": settings.runtime.seed,
+    }
+    if "evaluation_strategy" in accepted_names:
+        kwargs["evaluation_strategy"] = "steps" if has_eval else "no"
+    if "eval_strategy" in accepted_names:
+        kwargs["eval_strategy"] = "steps" if has_eval else "no"
+    # Newer transformers builds auto-select MPS when available. Older builds exposed
+    # an explicit flag, so only set it when the local TrainingArguments supports it.
+    if "use_mps_device" in accepted_names:
+        kwargs["use_mps_device"] = device == "mps"
+    return kwargs
+
+
 def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]:
     _validate_external_ocr_requirements(settings)
     output_root = (
@@ -276,28 +318,18 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
     train_dataset = SupervisedSampleDataset(train_rows)
     eval_dataset = SupervisedSampleDataset(eval_rows) if eval_rows else None
 
+    accepted_training_argument_names = set(
+        inspect.signature(TrainingArguments.__init__).parameters
+    )
     training_args = TrainingArguments(
-        output_dir=str(paths.checkpoints_dir),
-        remove_unused_columns=False,
-        per_device_train_batch_size=settings.training.per_device_train_batch_size,
-        per_device_eval_batch_size=settings.training.per_device_eval_batch_size,
-        gradient_accumulation_steps=settings.training.gradient_accumulation_steps,
-        num_train_epochs=settings.training.num_train_epochs,
-        learning_rate=settings.training.learning_rate,
-        weight_decay=settings.training.weight_decay,
-        warmup_ratio=settings.training.warmup_ratio,
-        logging_strategy="steps",
-        logging_steps=settings.training.logging_steps,
-        save_strategy="steps",
-        save_steps=settings.training.save_steps,
-        save_total_limit=settings.training.save_total_limit,
-        evaluation_strategy="steps" if eval_dataset is not None else "no",
-        eval_steps=settings.training.eval_steps if eval_dataset is not None else None,
-        dataloader_num_workers=settings.runtime.num_workers,
-        gradient_checkpointing=settings.training.gradient_checkpointing,
-        report_to=[],
-        seed=settings.runtime.seed,
-        use_mps_device=device == "mps",
+        **_build_training_arguments_kwargs(
+            settings,
+            output_dir=str(paths.checkpoints_dir),
+            has_eval=eval_dataset is not None,
+            dataloader_num_workers=settings.runtime.num_workers,
+            device=device,
+            accepted_names=accepted_training_argument_names,
+        )
     )
 
     trainer = Trainer(
