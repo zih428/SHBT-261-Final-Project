@@ -25,9 +25,9 @@ num_train_epochs = 1.0
 learning_rate = 0.0002
 weight_decay = 0.0
 warmup_ratio = 0.03
-logging_steps = 10
-save_steps = 100
-eval_steps = 100
+logging_steps = 25
+save_steps = 256
+eval_steps = 512
 save_total_limit = 2
 gradient_checkpointing = true
 

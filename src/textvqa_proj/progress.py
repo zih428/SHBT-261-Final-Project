@@ -223,6 +223,17 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     screening = summary["screening"]
     baseline = summary["screening_baseline"]
     finalists = summary["finalists"]
+    finalist_counts = finalists.get(
+        "counts",
+        {
+            "completed": 0,
+            "running": 0,
+            "pending": 0,
+            "failed": 0,
+            "other": 0,
+            "total": finalists.get("planned_runs", 0),
+        },
+    )
     training = summary["training"]
     appendix = summary["appendix"]
     prep = summary["prep"]
@@ -267,10 +278,10 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             "Next Stages",
             (
                 "- Finalists: "
-                f"{finalists['counts']['completed']} completed, "
-                f"{finalists['counts']['running']} running, "
-                f"{finalists['counts']['pending']} pending "
-                f"(total {finalists['counts']['total'] or finalists['planned_runs']}); "
+                f"{finalist_counts['completed']} completed, "
+                f"{finalist_counts['running']} running, "
+                f"{finalist_counts['pending']} pending "
+                f"(total {finalist_counts['total'] or finalists['planned_runs']}); "
                 f"{finalists['status']}"
             ),
             (
@@ -295,6 +306,9 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             lines.index("Next Stages") + 2,
             "- Active finalist run: "
             f"{finalist_active['label']} "
-            f"({finalist_active['processed_count']} processed, updated {finalist_active['updated_at']})",
+            "("
+            f"{finalist_active['processed_count']} processed, "
+            f"updated {finalist_active['updated_at']}"
+            ")",
         )
     return "\n".join(lines)

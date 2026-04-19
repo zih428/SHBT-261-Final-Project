@@ -131,6 +131,7 @@ The heuristic OCR baseline uses the same experiment configs with `configs/models
   OCR off vs OCR on
 
 The core matrix is machine-tuned to use a realistic pilot train size on this Mac first, then scale up in the dedicated scaling configs.
+The committed LoRA configs now evaluate every `512` optimizer steps and save every `256` steps, which cuts monitoring overhead substantially on Apple Silicon without changing the train/eval splits, learning schedule, or final checkpoint semantics.
 
 Dry-run example:
 
@@ -200,6 +201,7 @@ Each training run saves:
 
 - The main fine-tuning path remains intentionally Qwen-first because it is the most realistic LoRA target on this Apple Silicon machine.
 - The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, and LLaVA run most reliably at evaluation batch size `1`, while InternVL benefits from `2`.
+- LLaVA batching beyond `1` was re-checked on this machine against the real finalist prompt path and was not enabled, because it changed deterministic outputs relative to the single-sample baseline.
 - OCR-heavy prompt variants are capped at `32` OCR tokens in the committed configs to control prompt growth without changing the experiment families.
 - Adapters unload weights between runs and the runner backs off automatically if a larger batch hits OOM, which is safer than trying to keep multiple large VLMs resident in unified memory at once.
 - The finalist validation stage is set up as reusable validation configs rather than hard-coding the eventual top `8` before screening results exist.
