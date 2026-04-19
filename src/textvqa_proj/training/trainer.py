@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from textvqa_proj.utils.io import atomic_write_json, ensure_dir
@@ -34,7 +35,9 @@ class TrainingPaths:
 
 def write_trainer_state(paths: TrainingPaths, payload: dict[str, object]) -> None:
     ensure_dir(paths.root)
-    atomic_write_json(paths.state_path, payload)
+    stamped_payload = dict(payload)
+    stamped_payload["updated_at"] = datetime.now(tz=UTC).isoformat()
+    atomic_write_json(paths.state_path, stamped_payload)
 
 
 def write_training_settings(paths: TrainingPaths, payload: dict[str, object]) -> None:

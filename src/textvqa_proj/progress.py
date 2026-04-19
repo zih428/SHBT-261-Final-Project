@@ -237,6 +237,16 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     training = summary["training"]
     appendix = summary["appendix"]
     prep = summary["prep"]
+    def format_counts(counts: dict[str, int], *, total: int) -> str:
+        parts = [
+            f"{counts['completed']} completed",
+            f"{counts['running']} running",
+            f"{counts['pending']} pending",
+        ]
+        if counts.get("failed", 0):
+            parts.append(f"{counts['failed']} failed")
+        return ", ".join(parts) + f" (total {total})"
+
     lines = [
         "TextVQA Progress",
         "",
@@ -247,17 +257,11 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         "Screening",
         (
             "- Real VLM runs: "
-            f"{screening['counts']['completed']} completed, "
-            f"{screening['counts']['running']} running, "
-            f"{screening['counts']['pending']} pending "
-            f"(total {screening['counts']['total']})"
+            f"{format_counts(screening['counts'], total=screening['counts']['total'])}"
         ),
         (
             "- OCR baseline runs: "
-            f"{baseline['counts']['completed']} completed, "
-            f"{baseline['counts']['running']} running, "
-            f"{baseline['counts']['pending']} pending "
-            f"(total {baseline['counts']['total']})"
+            f"{format_counts(baseline['counts'], total=baseline['counts']['total'])}"
         ),
     ]
     active = screening.get("active_run")
@@ -278,25 +282,25 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             "Next Stages",
             (
                 "- Finalists: "
-                f"{finalist_counts['completed']} completed, "
-                f"{finalist_counts['running']} running, "
-                f"{finalist_counts['pending']} pending "
-                f"(total {finalist_counts['total'] or finalists['planned_runs']}); "
+                f"{format_counts(
+                    finalist_counts,
+                    total=finalist_counts['total'] or finalists['planned_runs'],
+                )}; "
                 f"{finalists['status']}"
             ),
             (
                 "- Training: "
-                f"{training['counts']['completed']} completed, "
-                f"{training['counts']['running']} running, "
-                f"{training['counts']['pending']} pending "
-                f"(total {training['counts']['total']}); {training['status']}"
+                f"{format_counts(
+                    training['counts'],
+                    total=training['counts']['total'],
+                )}; {training['status']}"
             ),
             (
                 "- Appendix: "
-                f"{appendix['counts']['completed']} completed, "
-                f"{appendix['counts']['running']} running, "
-                f"{appendix['counts']['pending']} pending "
-                f"(total {appendix['counts']['total']}); {appendix['status']}"
+                f"{format_counts(
+                    appendix['counts'],
+                    total=appendix['counts']['total'],
+                )}; {appendix['status']}"
             ),
         ]
     )

@@ -2,6 +2,7 @@ import torch
 
 from textvqa_proj.config import Settings
 from textvqa_proj.training.runner import (
+    _build_cpu_fallback_training_error,
     _build_training_arguments_kwargs,
     _resolve_cpu_safe_training_runtime,
 )
@@ -106,3 +107,47 @@ def test_resolve_cpu_safe_training_runtime_leaves_accelerated_path_unchanged() -
 
     assert dtype is torch.float16
     assert gradient_checkpointing is True
+
+
+class _FakeMPSBackend:
+    def __init__(self, *, built: bool) -> None:
+        self._built = built
+
+    def is_built(self) -> bool:
+        return self._built
+
+
+class _FakeBackends:
+    def __init__(self, *, mps_built: bool) -> None:
+        self.mps = _FakeMPSBackend(built=mps_built)
+
+
+class _FakeTorchModule:
+    def __init__(self, *, mps_built: bool) -> None:
+        self.backends = _FakeBackends(mps_built=mps_built)
+
+
+def test_build_cpu_fallback_training_error_reports_missing_mps_runtime() -> None:
+    settings = Settings()
+
+    message = _build_cpu_fallback_training_error(
+        torch_module=_FakeTorchModule(mps_built=True),
+        settings=settings,
+        device="cpu",
+    )
+
+    assert message is not None
+    assert "expected MPS" in message
+
+
+def test_build_cpu_fallback_training_error_skips_non_mps_setups() -> None:
+    settings = Settings()
+    settings.runtime.device_order = ["cpu"]
+
+    message = _build_cpu_fallback_training_error(
+        torch_module=_FakeTorchModule(mps_built=True),
+        settings=settings,
+        device="cpu",
+    )
+
+    assert message is None

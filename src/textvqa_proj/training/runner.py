@@ -201,6 +201,28 @@ def _resolve_cpu_safe_training_runtime(
     return dtype, effective_gradient_checkpointing
 
 
+def _build_cpu_fallback_training_error(
+    *,
+    torch_module: Any,
+    settings: Settings,
+    device: str,
+) -> str | None:
+    if device != "cpu":
+        return None
+    preferred_devices = {name.casefold() for name in settings.runtime.device_order}
+    if "mps" not in preferred_devices:
+        return None
+    mps_backend = getattr(getattr(torch_module, "backends", None), "mps", None)
+    if mps_backend is None or not mps_backend.is_built():
+        return None
+    return (
+        "Accelerated training is unavailable: this runtime expected MPS, but the local "
+        "torch build reports it unavailable. Qwen2.5-VL LoRA training on CPU fallback is "
+        "intentionally blocked because it is impractically slow on this machine. Use a "
+        "torch/macOS runtime with working MPS or rerun training on CUDA."
+    )
+
+
 def _build_training_arguments_kwargs(
     settings: Settings,
     *,
@@ -310,6 +332,18 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
             "transformers, accelerate, peft, and qwen-vl-utils are required for training"
         ) from exc
 
+    device = pick_device(settings.runtime.device_order)
+    cpu_fallback_error = _build_cpu_fallback_training_error(
+        torch_module=torch,
+        settings=settings,
+        device=device,
+    )
+    if cpu_fallback_error is not None:
+        summary["status"] = "failed"
+        summary["error"] = cpu_fallback_error
+        write_trainer_state(paths, summary)
+        raise RuntimeError(cpu_fallback_error)
+
     if settings.training.per_device_train_batch_size != 1:
         raise RuntimeError(
             "Set per_device_train_batch_size=1 for the current Qwen LoRA path; "
@@ -328,7 +362,6 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         **processor_kwargs,
     )
 
-    device = pick_device(settings.runtime.device_order)
     requested_dtype = getattr(torch, settings.model.torch_dtype, torch.float16)
     dtype, effective_gradient_checkpointing = _resolve_cpu_safe_training_runtime(
         torch_module=torch,
