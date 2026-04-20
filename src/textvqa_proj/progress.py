@@ -97,6 +97,57 @@ def _format_eta_duration(*, updated_at: str | None, eta_at: str | None) -> str |
     return f"{hours}h {minutes}m"
 
 
+def _ellipsize(value: str | None, width: int) -> str:
+    text = value or "-"
+    if len(text) <= width:
+        return text
+    if width <= 3:
+        return text[:width]
+    return text[: width - 3] + "..."
+
+
+def _render_table(headers: list[str], rows: list[list[str]]) -> str:
+    normalized_rows = [[cell if cell is not None else "-" for cell in row] for row in rows]
+    widths = [
+        max(len(headers[index]), *(len(row[index]) for row in normalized_rows))
+        for index in range(len(headers))
+    ]
+
+    def sep(char: str = "-") -> str:
+        return "+" + "+".join(char * (width + 2) for width in widths) + "+"
+
+    def render_row(row: list[str]) -> str:
+        cells = [f" {cell.ljust(widths[index])} " for index, cell in enumerate(row)]
+        return "|" + "|".join(cells) + "|"
+
+    lines = [sep(), render_row(headers), sep("=")]
+    lines.extend(render_row(row) for row in normalized_rows)
+    lines.append(sep())
+    return "\n".join(lines)
+
+
+def _training_display_name(run: dict[str, Any]) -> str:
+    label = run.get("label")
+    if isinstance(label, str) and " x " in label:
+        return label.split(" x ", maxsplit=1)[1]
+    if isinstance(label, str):
+        return label
+    return str(run.get("config_name", "-"))
+
+
+def _progress_cell(run: dict[str, Any]) -> str:
+    if run.get("current_step") is not None and run.get("max_steps") is not None:
+        return f"{run['current_step']}/{run['max_steps']}"
+    if run.get("processed_count"):
+        return f"{run['processed_count']}"
+    return "-"
+
+
+def _checkpoint_cell(run: dict[str, Any]) -> str:
+    checkpoint = run.get("checkpoint_step")
+    return str(checkpoint) if checkpoint is not None else "-"
+
+
 def _pid_is_alive(pid: int | None) -> bool:
     if pid is None:
         return False
@@ -492,211 +543,263 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     training = summary["training"]
     appendix = summary["appendix"]
     prep = summary["prep"]
+    prep_rows = [
+        ["Internal-dev external OCR", str(prep["internal_dev_external_ocr_rows"])],
+        ["Validation external OCR", str(prep["validation_external_ocr_rows"])],
+    ]
 
-    def format_counts(counts: dict[str, int], *, total: int) -> str:
-        parts = [
-            f"{counts['completed']} completed",
-            f"{counts['running']} running",
-            f"{counts['pending']} pending",
+    stage_rows = [
+        [
+            "Screening",
+            str(screening["counts"]["completed"]),
+            str(screening["counts"]["running"]),
+            str(screening["counts"]["pending"]),
+            str(screening["counts"].get("failed", 0)),
+            str(screening["counts"]["total"]),
+            "real VLMs",
+        ],
+        [
+            "OCR Baselines",
+            str(baseline["counts"]["completed"]),
+            str(baseline["counts"]["running"]),
+            str(baseline["counts"]["pending"]),
+            str(baseline["counts"].get("failed", 0)),
+            str(baseline["counts"]["total"]),
+            "heuristic OCR",
+        ],
+        [
+            "Finalists",
+            str(finalist_counts["completed"]),
+            str(finalist_counts["running"]),
+            str(finalist_counts["pending"]),
+            str(finalist_counts.get("failed", 0)),
+            str(finalist_counts["total"] or finalists["planned_runs"]),
+            finalists["status"],
+        ],
+        [
+            "Training",
+            str(training["counts"]["completed"]),
+            str(training["counts"]["running"]),
+            str(training["counts"]["pending"]),
+            str(training["counts"].get("failed", 0)),
+            str(training["counts"]["total"]),
+            training["status"],
+        ],
+        [
+            "Appendix",
+            str(appendix["counts"]["completed"]),
+            str(appendix["counts"]["running"]),
+            str(appendix["counts"]["pending"]),
+            str(appendix["counts"].get("failed", 0)),
+            str(appendix["counts"]["total"]),
+            appendix["status"],
+        ],
+    ]
+
+    active_rows: list[list[str]] = []
+    screening_active = screening.get("active_run")
+    if screening_active:
+        active_rows.append(
+            [
+                "Screening",
+                _ellipsize(screening_active["label"], 42),
+                f"{screening_active['processed_count']} rows",
+                _format_short_eastern(screening_active.get("updated_at"))
+                or str(screening_active.get("updated_at") or "-"),
+                "-",
+            ]
+        )
+    finalist_active = finalists.get("active_run")
+    if finalist_active:
+        active_rows.append(
+            [
+                "Finalists",
+                _ellipsize(finalist_active["label"], 42),
+                f"{finalist_active['processed_count']} rows",
+                _format_short_eastern(finalist_active.get("updated_at"))
+                or str(finalist_active.get("updated_at") or "-"),
+                "-",
+            ]
+        )
+    for run in training.get("runs") or []:
+        if run.get("status") not in {"running", "starting"}:
+            continue
+        active_rows.append(
+            [
+                "Training",
+                _ellipsize(_training_display_name(run), 28),
+                _progress_cell(run),
+                _format_short_eastern(run.get("updated_at"))
+                or str(run.get("updated_at") or "-"),
+                _format_eta_duration(
+                    updated_at=run.get("updated_at"),
+                    eta_at=run.get("eta_at"),
+                )
+                or "-",
+            ]
+        )
+
+    training_rows = [
+        [
+            _ellipsize(_training_display_name(run), 28),
+            str(run.get("status", "-")),
+            _progress_cell(run),
+            _checkpoint_cell(run),
+            _format_short_eastern(run.get("updated_at")) or str(run.get("updated_at") or "-"),
+            _format_eta_duration(
+                updated_at=run.get("updated_at"),
+                eta_at=run.get("eta_at"),
+            )
+            or "-",
+            _ellipsize(run.get("error"), 42),
         ]
-        if counts.get("failed", 0):
-            parts.append(f"{counts['failed']} failed")
-        return ", ".join(parts) + f" (total {total})"
+        for run in (training.get("runs") or [])
+    ]
 
     lines = [
         "TextVQA Progress",
         "",
         "Prep",
-        f"- Internal-dev external OCR: {prep['internal_dev_external_ocr_rows']} rows",
-        f"- Validation external OCR: {prep['validation_external_ocr_rows']} rows",
+        _render_table(["Item", "Rows"], prep_rows),
         "",
-        "Screening",
-        (
-            "- Real VLM runs: "
-            f"{format_counts(screening['counts'], total=screening['counts']['total'])}"
-        ),
-        (
-            "- OCR baseline runs: "
-            f"{format_counts(baseline['counts'], total=baseline['counts']['total'])}"
+        "Stages",
+        _render_table(
+            ["Stage", "Done", "Run", "Pend", "Fail", "Total", "Status"],
+            stage_rows,
         ),
     ]
-    active = screening.get("active_run")
-    if active:
-        lines.append(
-            "- Active run: "
-            f"{active['label']} "
-            "("
-            f"{active['processed_count']} processed, "
-            f"updated {_format_short_eastern(active['updated_at']) or active['updated_at']}"
-            ")"
-        )
+
     best = screening.get("best_completed_run")
     if best and best["accuracy"] is not None:
-        lines.append(
-            f"- Best completed run so far: {best['label']} (accuracy {best['accuracy']:.3f})"
+        lines.extend(
+            [
+                "",
+                "Screening Highlight",
+                _render_table(
+                    ["Metric", "Value"],
+                    [
+                        ["Best run", _ellipsize(best["label"], 52)],
+                        ["Accuracy", f"{best['accuracy']:.3f}"],
+                    ],
+                ),
+            ]
         )
-    lines.extend(["", "Next Stages"])
-    finalist_active = finalists.get("active_run")
-    if finalist_active:
-        finalist_updated = (
-            _format_short_eastern(finalist_active["updated_at"]) or finalist_active["updated_at"]
+
+    if active_rows:
+        lines.extend(
+            [
+                "",
+                "Active Runs",
+                _render_table(
+                    ["Stage", "Run", "Progress", "Updated (ET)", "ETA"],
+                    active_rows,
+                ),
+            ]
         )
-        lines.append(
-            "- Active finalist run: "
-            f"{finalist_active['label']} "
-            "("
-            f"{finalist_active['processed_count']} processed, "
-            f"updated {finalist_updated}"
-            ")"
+
+    if training_rows:
+        lines.extend(
+            [
+                "",
+                "Training Runs",
+                _render_table(
+                    ["Run", "Status", "Progress", "Ckpt", "Updated (ET)", "ETA", "Note"],
+                    training_rows,
+                ),
+            ]
         )
-    lines.append(
-        "- Finalists: "
-        f"{format_counts(
-            finalist_counts,
-            total=finalist_counts['total'] or finalists['planned_runs'],
-        )}; "
-        f"{finalists['status']}"
-    )
-    training_active = training.get("active_run")
-    if training_active:
-        detail_parts = []
-        if (
-            training_active.get("current_step") is not None
-            and training_active.get("max_steps") is not None
-        ):
-            detail_parts.append(
-                f"{training_active['current_step']}/{training_active['max_steps']} steps"
-            )
-        if training_active.get("checkpoint_step") is not None:
-            detail_parts.append(f"checkpoint {training_active['checkpoint_step']}")
-        if training_active.get("updated_at") is not None:
-            detail_parts.append(
-                "updated "
-                + (
-                    _format_short_eastern(training_active["updated_at"])
-                    or training_active["updated_at"]
-                )
-            )
-        eta_duration = _format_eta_duration(
-            updated_at=training_active.get("updated_at"),
-            eta_at=training_active.get("eta_at"),
-        )
-        if eta_duration is not None:
-            detail_parts.append(f"ETA {eta_duration}")
-        lines.append(
-            "- Active training run: "
-            f"{training_active['label']} "
-            f"({', '.join(detail_parts)})"
-        )
-    lines.append(
-        "- Training: "
-        f"{format_counts(
-            training['counts'],
-            total=training['counts']['total'],
-        )}; {training['status']}"
-    )
-    lines.append(
-        "- Appendix: "
-        f"{format_counts(
-            appendix['counts'],
-            total=appendix['counts']['total'],
-        )}; {appendix['status']}"
-    )
-    training_runs = training.get("runs") or []
-    if training_runs:
-        lines.extend(["", "Training Run Details"])
-        for run in training_runs:
-            details: list[str] = []
-            if run.get("current_step") is not None and run.get("max_steps") is not None:
-                details.append(f"{run['current_step']}/{run['max_steps']} steps")
-            elif run.get("processed_count"):
-                details.append(f"{run['processed_count']} rows")
-            if run.get("checkpoint_step") is not None:
-                details.append(f"checkpoint {run['checkpoint_step']}")
-            if run.get("updated_at") is not None:
-                details.append(
-                    "updated "
-                    + (_format_short_eastern(run["updated_at"]) or run["updated_at"])
-                )
-            eta_duration = _format_eta_duration(
-                updated_at=run.get("updated_at"),
-                eta_at=run.get("eta_at"),
-            )
-            if eta_duration is not None and run.get("status") == "running":
-                details.append(f"ETA {eta_duration}")
-            suffix = f" ({', '.join(details)})" if details else ""
-            lines.append(f"- {run['label']}: {run['status']}{suffix}")
-            if run.get("error"):
-                lines.append(f"  error: {run['error']}")
     return "\n".join(lines)
 
 
 def render_training_report(summary: dict[str, Any]) -> str:
     training = summary["training"]
     counts = training["counts"]
-
-    def format_counts(counts: dict[str, int]) -> str:
-        parts = [
-            f"{counts['completed']} completed",
-            f"{counts['running']} running",
-            f"{counts['pending']} pending",
-        ]
-        if counts.get("failed", 0):
-            parts.append(f"{counts['failed']} failed")
-        return ", ".join(parts) + f" (total {counts['total']})"
-
     status = (
         _stage_status(counts)
         if counts["running"] > 0 or counts["failed"] > 0 or counts["completed"] > 0
         else "pending"
     )
 
+    summary_rows = [[
+        str(counts["completed"]),
+        str(counts["running"]),
+        str(counts["pending"]),
+        str(counts.get("failed", 0)),
+        str(counts["total"]),
+        status,
+    ]]
+
+    active_rows = [
+        [
+            _ellipsize(_training_display_name(run), 28),
+            str(run.get("status", "-")),
+            _progress_cell(run),
+            _checkpoint_cell(run),
+            _format_short_eastern(run.get("updated_at")) or str(run.get("updated_at") or "-"),
+            _format_eta_duration(
+                updated_at=run.get("updated_at"),
+                eta_at=run.get("eta_at"),
+            )
+            or "-",
+        ]
+        for run in (training.get("runs") or [])
+        if run.get("status") in {"running", "starting"}
+    ]
+
+    all_rows = []
+    for run in training.get("runs") or []:
+        note = run.get("error")
+        latest_log = run.get("latest_log")
+        if (
+            note is None
+            and run.get("status") == "starting"
+            and latest_log
+            and latest_log.get("gpu_id") is not None
+        ):
+            note = f"gpu {latest_log['gpu_id']}"
+        all_rows.append(
+            [
+                _ellipsize(_training_display_name(run), 28),
+                str(run.get("status", "-")),
+                _progress_cell(run),
+                _checkpoint_cell(run),
+                _format_short_eastern(run.get("updated_at"))
+                or str(run.get("updated_at") or "-"),
+                _format_eta_duration(
+                    updated_at=run.get("updated_at"),
+                    eta_at=run.get("eta_at"),
+                )
+                or "-",
+                _ellipsize(note, 42),
+            ]
+        )
+
     lines = [
         "TextVQA Training Progress",
         "",
-        f"- Training: {format_counts(counts)}; {status}",
+        "Summary",
+        _render_table(["Done", "Run", "Pend", "Fail", "Total", "Status"], summary_rows),
     ]
-    active = training.get("active_run")
-    if active:
-        details: list[str] = []
-        if active.get("current_step") is not None and active.get("max_steps") is not None:
-            details.append(f"{active['current_step']}/{active['max_steps']} steps")
-        if active.get("checkpoint_step") is not None:
-            details.append(f"checkpoint {active['checkpoint_step']}")
-        if active.get("updated_at") is not None:
-            details.append(
-                "updated " + (_format_short_eastern(active["updated_at"]) or active["updated_at"])
-            )
-        eta_duration = _format_eta_duration(
-            updated_at=active.get("updated_at"),
-            eta_at=active.get("eta_at"),
+    if active_rows:
+        lines.extend(
+            [
+                "",
+                "Active Runs",
+                _render_table(
+                    ["Run", "Status", "Progress", "Ckpt", "Updated (ET)", "ETA"],
+                    active_rows,
+                ),
+            ]
         )
-        if eta_duration is not None:
-            details.append(f"ETA {eta_duration}")
-        lines.append(f"- Active run: {active['label']} ({', '.join(details)})")
 
-    lines.extend(["", "Per-Run Detail"])
-    for run in training.get("runs") or []:
-        details: list[str] = []
-        if run.get("current_step") is not None and run.get("max_steps") is not None:
-            details.append(f"{run['current_step']}/{run['max_steps']} steps")
-        if run.get("checkpoint_step") is not None:
-            details.append(f"checkpoint {run['checkpoint_step']}")
-        if run.get("updated_at") is not None:
-            details.append(
-                "updated " + (_format_short_eastern(run["updated_at"]) or run["updated_at"])
-            )
-        eta_duration = _format_eta_duration(
-            updated_at=run.get("updated_at"),
-            eta_at=run.get("eta_at"),
-        )
-        if eta_duration is not None and run.get("status") == "running":
-            details.append(f"ETA {eta_duration}")
-        latest_log = run.get("latest_log")
-        if run.get("status") == "starting" and latest_log and latest_log.get("gpu_id") is not None:
-            details.append(f"gpu {latest_log['gpu_id']}")
-        suffix = f" ({', '.join(details)})" if details else ""
-        lines.append(f"- {run['label']}: {run['status']}{suffix}")
-        if run.get("error"):
-            lines.append(f"  error: {run['error']}")
+    lines.extend(
+        [
+            "",
+            "All Runs",
+            _render_table(
+                ["Run", "Status", "Progress", "Ckpt", "Updated (ET)", "ETA", "Note"],
+                all_rows,
+            ),
+        ]
+    )
     return "\n".join(lines)

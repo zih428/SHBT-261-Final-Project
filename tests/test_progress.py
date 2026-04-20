@@ -89,23 +89,28 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     report = render_progress_report(summary)
 
     assert "TextVQA Progress" in report
-    assert "1 completed, 1 running, 22 pending" in report
+    assert "Stages" in report
+    assert "Screening" in report
+    assert "OCR Baselines" in report
     assert "qwen25_vl_3b x ocr_fused" in report
-    assert "accuracy 0.708" in report
-    assert "Active training run" in report
-    assert "128/1024 steps" in report
-    assert "Training Run Details" in report
-    assert "updated Apr 20 2:00 PM ET" in report
-    assert "ETA 2h 0m" in report
+    assert "Accuracy" in report
+    assert "0.708" in report
+    assert "Active Runs" in report
+    assert "Training Runs" in report
+    assert "128/1024" in report
+    assert "Apr 20 2:00 PM ET" in report
+    assert "2h 0m" in report
     assert "2026-04-20T18:00:00+00:00" not in report
 
     training_report = render_training_report(summary)
 
     assert "TextVQA Training Progress" in training_report
-    assert "Per-Run Detail" in training_report
-    assert "qwen25_vl_3b x core_all_linear_r16_seed07: running" in training_report
-    assert "updated Apr 20 2:00 PM ET" in training_report
-    assert "ETA 2h 0m" in training_report
+    assert "Summary" in training_report
+    assert "Active Runs" in training_report
+    assert "All Runs" in training_report
+    assert "core_all_linear_r16_seed07" in training_report
+    assert "Apr 20 2:00 PM ET" in training_report
+    assert "2h 0m" in training_report
     assert "Screening" not in training_report
 
 
@@ -139,8 +144,49 @@ def test_render_training_report_treats_starting_workers_as_running_stage() -> No
 
     training_report = render_training_report(summary)
 
-    assert "1 running" in training_report
+    assert "Summary" in training_report
     assert "blocked until finalist selection completes" not in training_report
-    assert "qwen25_vl_3b x core_all_linear_r16_seed07: starting" in training_report
-    assert "updated Apr 20 6:39 PM ET" in training_report
+    assert "core_all_linear_r16_seed07" in training_report
+    assert "starting" in training_report
+    assert "Apr 20 6:39 PM ET" in training_report
     assert "gpu 0" in training_report
+
+
+def test_render_training_report_lists_multiple_active_runs() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 0,
+                "running": 2,
+                "pending": 10,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "running",
+            "runs": [
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                    "status": "running",
+                    "current_step": 400,
+                    "max_steps": 1024,
+                    "updated_at": "2026-04-20T23:39:57+00:00",
+                    "eta_at": "2026-04-21T00:50:24+00:00",
+                },
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed13",
+                    "status": "running",
+                    "current_step": 375,
+                    "max_steps": 1024,
+                    "updated_at": "2026-04-20T23:37:56+00:00",
+                    "eta_at": "2026-04-21T00:52:34+00:00",
+                },
+            ],
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "Active Runs" in training_report
+    assert "core_all_linear_r16_seed07" in training_report
+    assert "core_all_linear_r16_seed13" in training_report
