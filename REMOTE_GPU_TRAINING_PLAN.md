@@ -21,33 +21,28 @@ The remote move is for the training stage only.
 
 ## Recommended vendor
 
-Primary recommendation: **Lambda On-Demand Cloud**
+Primary recommendation for the final move: **RunPod Secure Cloud**
 
-Why Lambda is the best fit for this repo:
+Why RunPod is now the right fit for this repo:
 
-- This project is a **script-first Python repo**, not a notebook workflow.
-- The main execution path is `python -m textvqa_proj.cli ...` and `.venv/bin/python scripts/run_all_experiments.py`.
-- Lambda gives us a normal Linux VM with:
-  - direct SSH access
-  - attachable persistent filesystems
-  - predictable fixed-price GPU SKUs
-  - no need to reshape the project into notebooks
-- That matches the current codebase much better than Colab.
+- the pod is already live and reachable with SSH
+- it exposes normal Linux shell access, which matches this repo's CLI-first workflow
+- the project is built around `.py` entrypoints, not notebooks
+- the selected pod has **2x H100 80 GB**, which is enough to run two independent training jobs in parallel without changing the scientific design
+- `/workspace` acts as the persistent volume, which lets us stop the expensive GPUs between waves without losing checkpoints or logs
 
-Recommended starting GPU options on Lambda:
+The practical execution model is:
 
-- **Best balance**: `1x NVIDIA A6000 48 GB`
-- **Safer / faster**: `1x NVIDIA A100 40 GB`
+- **2 single-GPU workers**, not distributed data parallel training
+- run the `8` core LoRA configs first in `4` waves of `2`
+- then run the `4` follow-up OCR-ablation / scaling configs after confirming the core winner still matches the current best-assumed follow-up settings
 
-Why these are the right size:
+That is the cleanest combination of:
 
-- The training path uses `Qwen/Qwen2.5-VL-3B-Instruct`
-- `float16`
-- image range `min_pixels = 200704`, `max_pixels = 1003520`
-- LoRA training with backprop and gradient checkpointing
-- effective batch size is controlled by `gradient_accumulation_steps = 8`, but the actual per-device batch is still `1`
-
-That is a single-GPU workload. We do **not** need a notebook service, and we do **not** need a multi-GPU cluster.
+- speed
+- cost control
+- implementation simplicity
+- scientific defensibility
 
 ## Why not Colab
 
@@ -60,40 +55,23 @@ Colab is not the right primary platform for this project because:
 
 For this repo, Colab would add friction without giving us a better scientific setup.
 
-## Why not make RunPod or Vast the primary choice
+## Why not Colab or Vast as the primary venue
 
-### RunPod
+### Colab
 
-RunPod is the best budget-minded fallback, but not my first choice here.
+Colab is not the right primary platform for this repo because:
 
-Pros:
-
-- SSH-friendly
-- official PyTorch templates
-- persistent volume / network volume options
-- often cheaper than fixed-price VM vendors
-
-Cons:
-
-- more container/pod-oriented than Lambda
-- pricing is more dynamic
-- more setup variance depending on template / cloud tier choice
-
-If budget becomes the top priority, the fallback choice should be:
-
-- **RunPod Secure Cloud**
-- not interruptible spot
-- official PyTorch template
+- it is notebook-first
+- runtimes are still more lifecycle-managed than a normal SSH VM/pod
+- the project is already implemented as scripts and CLIs, so Colab would add friction instead of removing it
 
 ### Vast.ai
 
-Vast.ai is attractive on price, but I do **not** recommend it as the primary venue for the final training matrix because:
+Vast.ai is attractive on raw price, but I do **not** recommend it as the primary venue for the final training matrix because:
 
-- it is a marketplace with host-to-host variability
+- it is a marketplace with more host-to-host variability
 - pricing and reliability vary in real time
-- interruptible options are attractive on cost but not ideal for the final reproducible run set
-
-It is better suited to cheap exploratory work than to the cleanest final-paper training record.
+- it is less clean for a final paper-grade training record than the already-running RunPod setup
 
 ## Scientific guardrails
 

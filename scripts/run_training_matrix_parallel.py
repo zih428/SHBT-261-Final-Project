@@ -59,6 +59,17 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--phase",
+        dest="selected_phases",
+        action="append",
+        choices=[name for name, _ in PHASES],
+        default=[],
+        help=(
+            "Run only the selected phase(s). Repeat to include multiple phases. "
+            "Defaults to every phase in order."
+        ),
+    )
+    parser.add_argument(
         "--gpu-ids",
         default=None,
         help="Comma-separated list of GPU indices to use. Defaults to every visible NVIDIA GPU.",
@@ -285,6 +296,14 @@ def main() -> int:
         raise RuntimeError("No NVIDIA GPUs detected.")
     max_parallel = min(args.max_parallel or len(gpu_ids), len(gpu_ids))
     extra_configs = [Path(path) for path in args.extra_configs]
+    selected_phase_names = set(args.selected_phases)
+    selected_phases = [
+        (phase, configs)
+        for phase, configs in PHASES
+        if not selected_phase_names or phase in selected_phase_names
+    ]
+    if not selected_phases:
+        raise RuntimeError("No phases selected.")
     log_root = Path(args.log_root) / now_stamp()
     ensure_dir(log_root)
     _log_summary(
@@ -295,14 +314,15 @@ def main() -> int:
             "extra_configs": [str(path) for path in extra_configs],
             "phases": {
                 phase: [str(path) for path in configs]
-                for phase, configs in PHASES
+                for phase, configs in selected_phases
             },
+            "stop_after_phase": args.stop_after_phase,
             "created_at": datetime.now(tz=UTC).isoformat(),
         },
     )
 
     overall_failed: list[str] = []
-    for phase, configs in PHASES:
+    for phase, configs in selected_phases:
         print(f"[phase] {phase} ({len(configs)} configs)")
         summary = run_phase(
             phase=phase,

@@ -169,6 +169,52 @@ To run the training matrix in parallel across multiple rented GPUs without touch
 
 The launcher runs one training process per GPU, keeps the `8` core LoRA runs ahead of the `best-assumed` OCR-ablation and scaling follow-ups, and writes worker logs plus launcher summaries under `outputs/logs/training_matrix/<timestamp>/`.
 
+For the cleanest paper workflow on rented GPUs, stage the matrix:
+
+1. Run the `8` core LoRA configs first:
+
+```bash
+.venv/bin/python scripts/run_training_matrix_parallel.py \
+  --config configs/runtime_cuda_runpod.toml \
+  --gpu-ids 0,1 \
+  --phase core-matrix
+```
+
+2. If the core winner still matches the current `best-assumed` follow-up configs, run the remaining OCR-ablation and data-scaling phases:
+
+```bash
+.venv/bin/python scripts/run_training_matrix_parallel.py \
+  --config configs/runtime_cuda_runpod.toml \
+  --gpu-ids 0,1 \
+  --phase ocr-ablation \
+  --phase data-scaling
+```
+
+This keeps the final training story scientifically clean while still using multiple rented GPUs in parallel.
+
+To monitor remote training with per-run detail instead of only stage-level totals:
+
+```bash
+.venv/bin/python scripts/progress_report.py \
+  --training-config configs/runtime_cuda_runpod.toml
+```
+
+That report now includes:
+
+- the active training run and current step/max step
+- the latest resumable checkpoint for each run
+- per-run update timestamps
+- ETA estimates for running training jobs
+
+### RunPod cost control
+
+For rented GPUs, treat the pod as a short-lived execution machine, not a permanent server:
+
+- store the repo, caches, checkpoints, and logs on the persistent `/workspace` volume
+- run the expensive GPU pod only while training is active
+- stop or terminate the pod after a phase finishes or when you are waiting on a decision
+- resume later from `checkpoint-*` without rerunning finished work
+
 ### Appendix and stress runs
 
 `configs/experiments/appendix/` contains:
