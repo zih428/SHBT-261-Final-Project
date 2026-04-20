@@ -17,19 +17,27 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from textvqa_proj.orchestration import training_completed
+from textvqa_proj.training.followups import (
+    load_completed_core_records,
+    select_followup_winner,
+    write_followup_override,
+)
 from textvqa_proj.utils.io import atomic_write_json, ensure_dir
 
-BASE_CONFIGS = [
-    REPO_ROOT / "configs/runtime.toml",
-    REPO_ROOT / "configs/data.toml",
-    REPO_ROOT / "configs/models/qwen25_vl_3b.toml",
-]
+RUNTIME_CONFIG = REPO_ROOT / "configs/runtime.toml"
+DATA_CONFIG = REPO_ROOT / "configs/data.toml"
+MODEL_CONFIG = REPO_ROOT / "configs/models/qwen25_vl_3b.toml"
+BASE_CONFIGS = [RUNTIME_CONFIG, DATA_CONFIG, MODEL_CONFIG]
 TRAINING_CONFIG_ROOT = REPO_ROOT / "configs/experiments/training"
+CORE_MATRIX_CONFIGS = sorted(TRAINING_CONFIG_ROOT.glob("core_*.toml"))
+OCR_ABLATION_CONFIGS = sorted(TRAINING_CONFIG_ROOT.glob("ocr_*.toml"))
+DATA_SCALING_CONFIGS = sorted(TRAINING_CONFIG_ROOT.glob("scale_*.toml"))
 PHASES: list[tuple[str, list[Path]]] = [
-    ("core-matrix", sorted(TRAINING_CONFIG_ROOT.glob("core_*.toml"))),
-    ("ocr-ablation", sorted(TRAINING_CONFIG_ROOT.glob("ocr_*.toml"))),
-    ("data-scaling", sorted(TRAINING_CONFIG_ROOT.glob("scale_*.toml"))),
+    ("core-matrix", CORE_MATRIX_CONFIGS),
+    ("ocr-ablation", OCR_ABLATION_CONFIGS),
+    ("data-scaling", DATA_SCALING_CONFIGS),
 ]
+FOLLOWUP_PHASES = {"ocr-ablation", "data-scaling"}
 DEFAULT_LOG_ROOT = REPO_ROOT / "outputs/logs/training_matrix"
 
 
@@ -106,6 +114,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the planned launches without starting subprocesses.",
     )
+    parser.add_argument(
+        "--followup-policy",
+        choices=["auto-from-core", "static"],
+        default="auto-from-core",
+        help=(
+            "How to configure the OCR-ablation and data-scaling follow-up phases. "
+            "'auto-from-core' derives the winning LoRA family from completed core-matrix runs "
+            "and writes a generated overlay TOML before launching the follow-ups."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -149,6 +167,38 @@ def _build_env(gpu_id: str) -> dict[str, str]:
 def _log_summary(path: Path, payload: dict[str, object]) -> None:
     ensure_dir(path.parent)
     atomic_write_json(path, payload)
+
+
+def _phase_extra_configs(
+    *,
+    phase: str,
+    extra_configs: list[Path],
+    log_root: Path,
+    followup_policy: str,
+) -> list[Path]:
+    if phase not in FOLLOWUP_PHASES or followup_policy != "auto-from-core":
+        return list(extra_configs)
+
+    generated_root = log_root / "generated_followups"
+    records = load_completed_core_records(
+        REPO_ROOT,
+        base_config_paths=[RUNTIME_CONFIG, DATA_CONFIG],
+        model_config_path=MODEL_CONFIG,
+        training_config_paths=CORE_MATRIX_CONFIGS,
+        extra_config_paths=extra_configs,
+    )
+    selection = select_followup_winner(records)
+    override_path = generated_root / "winner_override.toml"
+    selection_path = generated_root / "winner_selection.json"
+    write_followup_override(override_path, selection)
+    _log_summary(selection_path, selection.to_dict())
+    print(
+        "[followup-selection] "
+        f"{selection.family_key} "
+        f"(mean eval_loss {selection.mean_eval_loss:.4f}) -> {override_path}",
+        flush=True,
+    )
+    return [*extra_configs, override_path]
 
 
 def _prewarm_repo(repo_id: str) -> None:
@@ -343,6 +393,7 @@ def main() -> int:
             "gpu_ids": gpu_ids,
             "max_parallel": max_parallel,
             "extra_configs": [str(path) for path in extra_configs],
+            "followup_policy": args.followup_policy,
             "prewarm_repo_ids": args.prewarm_repo_ids,
             "phases": {
                 phase: [str(path) for path in configs]
@@ -359,12 +410,18 @@ def main() -> int:
 
     overall_failed: list[str] = []
     for phase, configs in selected_phases:
+        phase_extra_configs = _phase_extra_configs(
+            phase=phase,
+            extra_configs=extra_configs,
+            log_root=log_root,
+            followup_policy=args.followup_policy,
+        )
         print(f"[phase] {phase} ({len(configs)} configs)", flush=True)
         summary = run_phase(
             phase=phase,
             configs=configs,
             gpu_ids=gpu_ids,
-            extra_configs=extra_configs,
+            extra_configs=phase_extra_configs,
             max_parallel=max_parallel,
             log_root=log_root,
             dry_run=args.dry_run,

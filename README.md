@@ -168,7 +168,8 @@ To run the training matrix in parallel across multiple rented GPUs without touch
   --prewarm-repo-id Qwen/Qwen2.5-VL-3B-Instruct
 ```
 
-The launcher runs one training process per GPU, keeps the `8` core LoRA runs ahead of the `best-assumed` OCR-ablation and scaling follow-ups, and writes worker logs plus launcher summaries under `outputs/logs/training_matrix/<timestamp>/`.
+The launcher runs one training process per GPU, keeps the `8` core LoRA runs ahead of the OCR-ablation and scaling follow-ups, and writes worker logs plus launcher summaries under `outputs/logs/training_matrix/<timestamp>/`.
+When a follow-up phase starts, it now reads the completed `8` core runs, selects the winning LoRA family by **mean eval loss across the two seeds**, and writes a generated `winner_override.toml` under the launcher log root before queueing the remaining runs.
 
 For the cleanest paper workflow on rented GPUs, stage the matrix:
 
@@ -183,7 +184,7 @@ tmux new-session -d -s textvqa-core \
     --prewarm-repo-id Qwen/Qwen2.5-VL-3B-Instruct'
 ```
 
-2. If the core winner still matches the current `best-assumed` follow-up configs, run the remaining OCR-ablation and data-scaling phases:
+2. Then run the remaining OCR-ablation and data-scaling phases. They now auto-select the core winner instead of relying on the hard-coded `best-assumed` default:
 
 ```bash
 tmux new-session -d -s textvqa-followups \
@@ -194,7 +195,17 @@ tmux new-session -d -s textvqa-followups \
     --phase data-scaling'
 ```
 
-This keeps the final training story scientifically clean while still using multiple rented GPUs in parallel.
+If the core phase is already running and you want the handoff to happen automatically without manual babysitting, start the continuation helper once:
+
+```bash
+tmux new-session -d -s textvqa-followups \
+  '.venv/bin/python scripts/continue_training_pipeline.py \
+    --wait-launch-dir outputs/logs/training_matrix/<core-launch-timestamp> \
+    --config configs/runtime_cuda_runpod.toml \
+    --gpu-ids 0,1'
+```
+
+This keeps the final training story scientifically clean while still using multiple rented GPUs in parallel and without depending on a Codex heartbeat to notice the phase boundary.
 
 Using `tmux` on the remote pod matters in practice: it keeps the launcher alive after you disconnect and gives you one stable session to reattach instead of relying on shell background jobs.
 

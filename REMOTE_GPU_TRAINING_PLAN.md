@@ -35,7 +35,7 @@ The practical execution model is:
 
 - **2 single-GPU workers**, not distributed data parallel training
 - run the `8` core LoRA configs first in `4` waves of `2`
-- then run the `4` follow-up OCR-ablation / scaling configs after confirming the core winner still matches the current best-assumed follow-up settings
+- then run the `4` follow-up OCR-ablation / scaling configs with an automatically generated winner overlay derived from the completed core matrix
 
 That is the cleanest combination of:
 
@@ -204,7 +204,7 @@ Run **all 12 training configs from scratch** on the rental GPUs using the new ru
 Recommended execution order on `2x H100`:
 
 1. `core-matrix` phase on both GPUs in parallel
-2. confirm the winner is still the expected backbone/prompt variant
+2. generate a follow-up override from the completed core runs by selecting the best family via **mean eval loss across both seeds**
 3. `ocr-ablation` phase on both GPUs in parallel
 4. `data-scaling` phase on both GPUs in parallel
 
@@ -297,8 +297,8 @@ The recommended next action is:
 1. Keep the existing **RunPod** pod on-demand.
 2. Use the committed remote override config and staged launcher:
    - `core-matrix` first
-   - then `ocr-ablation`
-   - then `data-scaling`
+   - then the continuation helper or a second launcher for `ocr-ablation` + `data-scaling`
+   - let the repo generate the winner override instead of editing the `best-assumed` TOMLs by hand
 3. Stop the pod whenever no active phase is running.
 
 At that point, the remote training run can proceed as the canonical final training stage.
