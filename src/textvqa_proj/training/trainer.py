@@ -49,7 +49,7 @@ def write_training_settings(paths: TrainingPaths, payload: dict[str, object]) ->
     if existing_payload != payload:
         raise RuntimeError(
             f"Training directory {paths.root} already exists with different settings. "
-            "Use a new run_name or runtime.run_tag to separate protocols."
+            "Use a new run_name, training.run_tag, or runtime.run_tag to separate protocols."
         )
 
 

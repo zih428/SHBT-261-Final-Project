@@ -234,7 +234,7 @@ def _build_training_arguments_kwargs(
     accepted_names: set[str],
 ) -> dict[str, object]:
     safe_num_workers = dataloader_num_workers if device != "cpu" else 0
-    pin_memory = device != "cpu"
+    pin_memory = device == "cuda"
     kwargs: dict[str, object] = {
         "output_dir": output_dir,
         "remove_unused_columns": False,
@@ -282,7 +282,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
     output_root = (
         Path(settings.training.output_root)
         / settings.experiment.name
-        / settings.run_dir_name
+        / settings.training_run_dir_name
     )
     paths = TrainingPaths(ensure_dir(output_root))
     train_rows = load_training_samples(

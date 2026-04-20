@@ -31,7 +31,7 @@ def test_training_arguments_kwargs_supports_legacy_trainingarguments() -> None:
     assert "eval_strategy" not in kwargs
     assert kwargs["use_mps_device"] is True
     assert kwargs["use_cpu"] is False
-    assert kwargs["dataloader_pin_memory"] is True
+    assert kwargs["dataloader_pin_memory"] is False
     assert kwargs["dataloader_persistent_workers"] is True
 
 
@@ -57,7 +57,7 @@ def test_training_arguments_kwargs_supports_modern_trainingarguments() -> None:
     assert "evaluation_strategy" not in kwargs
     assert "use_mps_device" not in kwargs
     assert kwargs["use_cpu"] is False
-    assert kwargs["dataloader_pin_memory"] is True
+    assert kwargs["dataloader_pin_memory"] is False
     assert kwargs["dataloader_persistent_workers"] is True
 
 

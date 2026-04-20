@@ -35,6 +35,20 @@ def test_run_dir_name_includes_run_tag_and_model_batch_override() -> None:
     assert settings.eval_batch_size == 4
 
 
+def test_training_run_dir_name_appends_training_run_tag() -> None:
+    settings = Settings()
+    settings.model.adapter = "qwen2_5_vl"
+    settings.model.model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+    settings.experiment.run_name = "all-linear-r16-seed07"
+    settings.runtime.run_tag = "mps-tuned-v1"
+    settings.training.run_tag = "train-speed-v2"
+
+    assert (
+        settings.training_run_dir_name
+        == "qwen2-5-vl-3b-instruct-all-linear-r16-seed07-mps-tuned-v1-train-speed-v2"
+    )
+
+
 def test_runner_rejects_settings_mismatch_for_existing_run(tmp_path) -> None:
     manifest_path = tmp_path / "manifest.jsonl"
     write_manifest(

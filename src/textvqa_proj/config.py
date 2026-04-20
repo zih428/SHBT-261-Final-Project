@@ -93,6 +93,7 @@ class ExperimentSettings:
 @dataclass(slots=True)
 class TrainingSettings:
     output_root: str = "outputs/training"
+    run_tag: str | None = None
     train_split: str = "train"
     eval_split: str | None = "validation"
     train_limit: int | None = None
@@ -144,7 +145,7 @@ class Settings:
         return re.sub(r"[^a-z0-9]+", "-", source.casefold()).strip("-")
 
     @property
-    def run_dir_name(self) -> str:
+    def _base_run_dir_name(self) -> str:
         base = re.sub(r"[^a-z0-9]+", "-", self.run_name.casefold()).strip("-")
         if not base:
             base = "run"
@@ -152,8 +153,22 @@ class Settings:
             run_dir = base
         else:
             run_dir = f"{self.model_slug}-{base}"
+        return run_dir
+
+    @property
+    def run_dir_name(self) -> str:
+        run_dir = self._base_run_dir_name
         if self.runtime.run_tag:
             tag = re.sub(r"[^a-z0-9]+", "-", self.runtime.run_tag.casefold()).strip("-")
+            if tag:
+                return f"{run_dir}-{tag}"
+        return run_dir
+
+    @property
+    def training_run_dir_name(self) -> str:
+        run_dir = self.run_dir_name
+        if self.training.run_tag:
+            tag = re.sub(r"[^a-z0-9]+", "-", self.training.run_tag.casefold()).strip("-")
             if tag:
                 return f"{run_dir}-{tag}"
         return run_dir

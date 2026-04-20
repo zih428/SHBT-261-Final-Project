@@ -1,4 +1,4 @@
-# TextVQA Project Scaffold
+# TextVQA Experiment System
 
 Resumable, machine-tuned experimentation code for the SHBT 261 TextVQA final project.
 
@@ -131,7 +131,7 @@ The heuristic OCR baseline uses the same experiment configs with `configs/models
   OCR off vs OCR on
 
 The core matrix is machine-tuned to use a realistic pilot train size on this Mac first, then scale up in the dedicated scaling configs.
-The committed LoRA configs now evaluate every `512` optimizer steps and save every `256` steps, which cuts monitoring overhead substantially on Apple Silicon without changing the train/eval splits, learning schedule, or final checkpoint semantics.
+The committed LoRA configs now evaluate every `1024` optimizer steps and save every `512` steps, which cuts monitoring overhead substantially on Apple Silicon without changing the train/eval splits, learning schedule, or final checkpoint semantics.
 
 Dry-run example:
 
@@ -201,6 +201,8 @@ Each training run saves:
 
 - The main fine-tuning path remains intentionally Qwen-first because it is the most realistic LoRA target on this Apple Silicon machine.
 - The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, and LLaVA run most reliably at evaluation batch size `1`, while InternVL benefits from `2`.
+- Qwen LoRA training on this Mac is now machine-tuned to keep gradient checkpointing on, disable unsupported pinned-memory loading on MPS, and use dataloader worker count `2`; a controlled benchmark on the live stack showed that `2` workers outperformed both `0` and `4` for the MPS training path.
+- The batch runner now wraps long subprocesses with `caffeinate` when available so the machine does not idle-sleep in the middle of long evaluation or training jobs.
 - LLaVA batching beyond `1` was re-checked on this machine against the real finalist prompt path and was not enabled, because it changed deterministic outputs relative to the single-sample baseline.
 - OCR-heavy prompt variants are capped at `32` OCR tokens in the committed configs to control prompt growth without changing the experiment families.
 - Adapters unload weights between runs and the runner backs off automatically if a larger batch hits OOM, which is safer than trying to keep multiple large VLMs resident in unified memory at once.

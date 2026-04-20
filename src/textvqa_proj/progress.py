@@ -109,10 +109,10 @@ def _latest_screening_summary(repo_root: Path) -> dict[str, Any] | None:
 
 
 def _stage_status(counts: dict[str, int]) -> str:
-    if counts["failed"] > 0:
-        return "failed"
     if counts["running"] > 0:
         return "running"
+    if counts["failed"] > 0:
+        return "failed"
     if counts["completed"] == counts["total"] and counts["total"] > 0:
         return "completed"
     if counts["completed"] > 0 and counts["pending"] > 0:
@@ -205,7 +205,12 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
             "status": (
                 _stage_status(training_counts)
                 if any(run.status != "pending" for run in training_runs)
-                else "blocked until finalist selection completes"
+                else (
+                    "pending"
+                    if finalist_counts["completed"] == finalist_counts["total"]
+                    and finalist_counts["total"] > 0
+                    else "blocked until finalist selection completes"
+                )
             ),
         },
         "appendix": {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import asdict
@@ -96,7 +97,10 @@ def run_command(
     dry_run: bool,
 ) -> None:
     print(f"[run] {label}")
-    print("       " + " ".join(command))
+    wrapped_command = list(command)
+    if shutil.which("caffeinate"):
+        wrapped_command = ["caffeinate", "-dimsu", *wrapped_command]
+    print("       " + " ".join(wrapped_command))
     if dry_run:
         return
     log_path = log_root / f"{label}.log"
@@ -110,7 +114,7 @@ def run_command(
         handle.write(f"$ {' '.join(command)}\n")
         handle.flush()
         subprocess.run(
-            command,
+            wrapped_command,
             cwd=REPO_ROOT,
             env=env,
             stdout=handle,

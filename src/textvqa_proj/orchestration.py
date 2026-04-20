@@ -50,7 +50,7 @@ def training_run_root(repo_root: Path, settings: Settings) -> Path:
     return (
         resolve_repo_path(repo_root, settings.training.output_root)
         / settings.experiment.name
-        / settings.run_dir_name
+        / settings.training_run_dir_name
     )
 
 
