@@ -42,13 +42,36 @@ def test_render_progress_report_mentions_stage_counts() -> None:
         "training": {
             "counts": {
                 "completed": 0,
-                "running": 0,
-                "pending": 12,
+                "running": 1,
+                "pending": 11,
                 "failed": 0,
                 "other": 0,
                 "total": 12,
             },
-            "status": "blocked until screening/finalist selection completes",
+            "status": "running",
+            "active_run": {
+                "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                "current_step": 128,
+                "max_steps": 1024,
+                "checkpoint_step": 0,
+                "updated_at": "2026-04-20T18:00:00+00:00",
+                "eta_at": "2026-04-20T20:00:00+00:00",
+            },
+            "runs": [
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                    "status": "running",
+                    "current_step": 128,
+                    "max_steps": 1024,
+                    "checkpoint_step": 0,
+                    "updated_at": "2026-04-20T18:00:00+00:00",
+                    "eta_at": "2026-04-20T20:00:00+00:00",
+                },
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed13",
+                    "status": "pending",
+                },
+            ],
         },
         "appendix": {
             "counts": {
@@ -69,3 +92,6 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "1 completed, 1 running, 22 pending" in report
     assert "qwen25_vl_3b x ocr_fused" in report
     assert "accuracy 0.708" in report
+    assert "Active training run" in report
+    assert "128/1024 steps" in report
+    assert "Training Run Details" in report

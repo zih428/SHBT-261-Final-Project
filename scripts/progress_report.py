@@ -18,6 +18,17 @@ from textvqa_proj.utils.io import json_default
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Show overall TextVQA experiment progress.")
     parser.add_argument(
+        "--training-config",
+        dest="training_configs",
+        action="append",
+        default=[],
+        help=(
+            "Additional config file layered onto training runs only. "
+            "Use this to follow a remote training namespace without affecting the "
+            "canonical local evaluation stages."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print the raw JSON summary instead of the human-readable report.",
@@ -27,7 +38,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    summary = summarize_project_progress(REPO_ROOT)
+    summary = summarize_project_progress(
+        REPO_ROOT,
+        training_overlays=[Path(path) for path in args.training_configs],
+    )
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True, default=json_default))
         return

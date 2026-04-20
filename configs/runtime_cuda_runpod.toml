@@ -1,0 +1,7 @@
+[runtime]
+device_order = ["cuda", "cpu"]
+num_workers = 4
+run_tag = "cuda-runpod-v1"
+
+[model]
+local_files_only = false

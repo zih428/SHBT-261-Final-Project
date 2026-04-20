@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,44 @@ def _build_training_summary(
     }
 
 
+def _build_trainer_progress_payload(
+    summary: dict[str, Any],
+    *,
+    global_step: int | None = None,
+    max_steps: int | None = None,
+    epoch: float | None = None,
+    started_at: str | None = None,
+    resumed_from_step: int | None = None,
+    latest_log: dict[str, object] | None = None,
+    latest_eval: dict[str, object] | None = None,
+    checkpoint_step: int | None = None,
+    status: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    payload = dict(summary)
+    if status is not None:
+        payload["status"] = status
+    if global_step is not None:
+        payload["global_step"] = int(global_step)
+    if max_steps is not None:
+        payload["max_steps"] = int(max_steps)
+    if epoch is not None:
+        payload["epoch"] = float(epoch)
+    if started_at is not None:
+        payload["started_at"] = started_at
+    if resumed_from_step is not None:
+        payload["resumed_from_step"] = int(resumed_from_step)
+    if latest_log is not None:
+        payload["latest_log"] = latest_log
+    if latest_eval is not None:
+        payload["latest_eval"] = latest_eval
+    if checkpoint_step is not None:
+        payload["checkpoint_step"] = int(checkpoint_step)
+    if error is not None:
+        payload["error"] = error
+    return payload
+
+
 class QwenSingleSampleLoraCollator:
     def __init__(self, processor: Any) -> None:
         try:
@@ -221,6 +260,85 @@ def _build_cpu_fallback_training_error(
         "intentionally blocked because it is impractically slow on this machine. Use a "
         "torch/macOS runtime with working MPS or rerun training on CUDA."
     )
+
+
+def _checkpoint_step(paths: TrainingPaths) -> int | None:
+    checkpoint = latest_checkpoint(paths)
+    if checkpoint is None:
+        return None
+    try:
+        return int(checkpoint.name.split("-", maxsplit=1)[1])
+    except (IndexError, ValueError):
+        return None
+
+
+class TrainingProgressCallbackMixin:
+    def __init__(
+        self,
+        *,
+        paths: TrainingPaths,
+        summary: dict[str, Any],
+        resumed_from_step: int,
+    ) -> None:
+        self.paths = paths
+        self.summary = summary
+        self.resumed_from_step = resumed_from_step
+        self.started_at: str | None = None
+        self.latest_log: dict[str, object] | None = None
+        self.latest_eval: dict[str, object] | None = None
+
+    def _write(self, state: Any) -> None:
+        write_trainer_state(
+            self.paths,
+            _build_trainer_progress_payload(
+                self.summary,
+                status="running",
+                global_step=getattr(state, "global_step", None),
+                max_steps=getattr(state, "max_steps", None),
+                epoch=getattr(state, "epoch", None),
+                started_at=self.started_at,
+                resumed_from_step=self.resumed_from_step,
+                latest_log=self.latest_log,
+                latest_eval=self.latest_eval,
+                checkpoint_step=_checkpoint_step(self.paths),
+            ),
+        )
+
+    def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        del args, control, kwargs
+        if self.started_at is None:
+            self.started_at = datetime.now(tz=UTC).isoformat()
+        self._write(state)
+
+    def on_log(
+        self,
+        args: Any,
+        state: Any,
+        control: Any,
+        logs: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        del args, control, kwargs
+        if logs:
+            self.latest_log = dict(logs)
+        self._write(state)
+
+    def on_evaluate(
+        self,
+        args: Any,
+        state: Any,
+        control: Any,
+        metrics: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        del args, control, kwargs
+        if metrics:
+            self.latest_eval = dict(metrics)
+        self._write(state)
+
+    def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        del args, control, kwargs
+        self._write(state)
 
 
 def _build_training_arguments_kwargs(
@@ -325,6 +443,7 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
             AutoProcessor,
             Qwen2_5_VLForConditionalGeneration,
             Trainer,
+            TrainerCallback,
             TrainingArguments,
         )
     except ImportError as exc:
@@ -424,21 +543,78 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         data_collator=collator,
     )
 
-    summary["status"] = "running"
-    write_trainer_state(paths, summary)
     checkpoint = latest_checkpoint(paths)
+    resumed_from_step = _checkpoint_step(paths) or 0
+    class HFTrainingProgressCallback(TrainingProgressCallbackMixin, TrainerCallback):
+        pass
+
+    progress_callback = HFTrainingProgressCallback(
+        paths=paths,
+        summary=summary,
+        resumed_from_step=resumed_from_step,
+    )
+    trainer.add_callback(progress_callback)
+    write_trainer_state(
+        paths,
+        _build_trainer_progress_payload(
+            summary,
+            status="running",
+            global_step=resumed_from_step,
+            max_steps=getattr(training_args, "max_steps", None),
+            started_at=None,
+            resumed_from_step=resumed_from_step,
+            checkpoint_step=_checkpoint_step(paths),
+        ),
+    )
     try:
         trainer.train(resume_from_checkpoint=str(checkpoint) if checkpoint else None)
         trainer.save_state()
         model.save_pretrained(paths.adapter_dir)
         processor.save_pretrained(paths.processor_dir)
     except Exception as exc:
-        summary["status"] = "failed"
-        summary["error"] = f"{type(exc).__name__}: {exc}"
-        write_trainer_state(paths, summary)
+        write_trainer_state(
+            paths,
+            _build_trainer_progress_payload(
+                summary,
+                status="failed",
+                global_step=getattr(trainer.state, "global_step", None),
+                max_steps=getattr(trainer.state, "max_steps", None),
+                epoch=getattr(trainer.state, "epoch", None),
+                started_at=progress_callback.started_at,
+                resumed_from_step=resumed_from_step,
+                latest_log=progress_callback.latest_log,
+                latest_eval=progress_callback.latest_eval,
+                checkpoint_step=_checkpoint_step(paths),
+                error=f"{type(exc).__name__}: {exc}",
+            ),
+        )
         raise
 
-    summary["status"] = "completed"
-    write_trainer_state(paths, summary)
+    write_trainer_state(
+        paths,
+        _build_trainer_progress_payload(
+            summary,
+            status="completed",
+            global_step=getattr(trainer.state, "global_step", None),
+            max_steps=getattr(trainer.state, "max_steps", None),
+            epoch=getattr(trainer.state, "epoch", None),
+            started_at=progress_callback.started_at,
+            resumed_from_step=resumed_from_step,
+            latest_log=progress_callback.latest_log,
+            latest_eval=progress_callback.latest_eval,
+            checkpoint_step=_checkpoint_step(paths),
+        ),
+    )
     LOGGER.info("Saved LoRA adapter to %s", paths.adapter_dir)
-    return summary
+    return _build_trainer_progress_payload(
+        summary,
+        status="completed",
+        global_step=getattr(trainer.state, "global_step", None),
+        max_steps=getattr(trainer.state, "max_steps", None),
+        epoch=getattr(trainer.state, "epoch", None),
+        started_at=progress_callback.started_at,
+        resumed_from_step=resumed_from_step,
+        latest_log=progress_callback.latest_log,
+        latest_eval=progress_callback.latest_eval,
+        checkpoint_step=_checkpoint_step(paths),
+    )

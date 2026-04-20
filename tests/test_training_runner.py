@@ -3,6 +3,7 @@ import torch
 from textvqa_proj.config import Settings
 from textvqa_proj.training.runner import (
     _build_cpu_fallback_training_error,
+    _build_trainer_progress_payload,
     _build_training_arguments_kwargs,
     _resolve_cpu_safe_training_runtime,
 )
@@ -151,3 +152,27 @@ def test_build_cpu_fallback_training_error_skips_non_mps_setups() -> None:
     )
 
     assert message is None
+
+
+def test_build_trainer_progress_payload_tracks_runtime_state() -> None:
+    payload = _build_trainer_progress_payload(
+        {"status": "ready", "run_name": "demo"},
+        status="running",
+        global_step=128,
+        max_steps=1024,
+        epoch=0.125,
+        started_at="2026-04-20T12:00:00+00:00",
+        resumed_from_step=0,
+        checkpoint_step=128,
+        latest_log={"loss": 1.23, "step": 128},
+        latest_eval={"eval_loss": 0.5},
+    )
+
+    assert payload["status"] == "running"
+    assert payload["global_step"] == 128
+    assert payload["max_steps"] == 1024
+    assert payload["epoch"] == 0.125
+    assert payload["started_at"] == "2026-04-20T12:00:00+00:00"
+    assert payload["checkpoint_step"] == 128
+    assert payload["latest_log"] == {"loss": 1.23, "step": 128}
+    assert payload["latest_eval"] == {"eval_loss": 0.5}

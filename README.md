@@ -78,7 +78,14 @@ To see a one-shot overall progress summary without digging through `outputs/` ma
 .venv/bin/python scripts/progress_report.py
 ```
 
-Use `--json` if you want the raw machine-readable summary. The report follows the live queue state across screening, OCR baselines, finalist reruns, training, and appendix once those stages start.
+Use `--json` if you want the raw machine-readable summary. The report follows the live queue state across screening, OCR baselines, finalist reruns, training, and appendix once those stages start. It now renders per-training-run step progress, checkpoint state, and ETA when that information is available from the trainer state file.
+
+If training is running under a separate remote CUDA namespace, pass the remote override config only to the training stage:
+
+```bash
+.venv/bin/python scripts/progress_report.py \
+  --training-config configs/runtime_cuda_runpod.toml
+```
 
 ## Experiment surface
 
@@ -144,6 +151,24 @@ python -m textvqa_proj.cli train \
   --config configs/experiments/training/core_all_linear_r16_seed07.toml
 ```
 
+### Remote CUDA training
+
+`configs/runtime_cuda_runpod.toml` is the committed remote-training override for rented NVIDIA GPUs. It:
+
+- switches device order to `cuda, cpu`
+- disables `local_files_only` for the model stack
+- places remote training outputs in a new run namespace via `cuda-runpod-v1`
+
+To run the training matrix in parallel across multiple rented GPUs without touching the completed local evaluation results:
+
+```bash
+.venv/bin/python scripts/run_training_matrix_parallel.py \
+  --config configs/runtime_cuda_runpod.toml \
+  --gpu-ids 0,1
+```
+
+The launcher runs one training process per GPU, keeps the `8` core LoRA runs ahead of the `best-assumed` OCR-ablation and scaling follow-ups, and writes worker logs plus launcher summaries under `outputs/logs/training_matrix/<timestamp>/`.
+
 ### Appendix and stress runs
 
 `configs/experiments/appendix/` contains:
@@ -191,11 +216,13 @@ Each training run saves:
 - External OCR sidecar generation resumes by re-reading the existing output JSONL and skipping completed sample IDs.
 - Output directories are namespaced by model slug plus run name to avoid collisions across the experiment matrix.
 - `runtime.run_tag` is included in the output directory name, which makes it safe to relaunch the full matrix under a new tuned protocol without mixing old and new results.
+- The remote CUDA override uses a distinct `runtime.run_tag`, which makes it safe to keep local Apple Silicon pilot checkpoints and remote NVIDIA training outputs side by side.
 - Existing run directories now reject settings mismatches instead of silently appending incompatible outputs.
 - External/fused OCR configs fail fast if the required OCR sidecar manifest is missing.
 - The batch runner writes screening and finalist promotion summaries to `outputs/logs/run_all/<timestamp>/` so the chosen finalists and winning evaluation backbone are recorded for later write-up.
 - Optional semantic metrics degrade gracefully if NLTK corpora such as `wordnet` are absent, so experiment runs do not crash after prediction generation.
 - The batch runner keeps going past failed model/config combinations and preserves the per-run error logs, which is useful if some backbones are not fully cached locally.
+- Training now writes fine-grained progress back into the top-level `trainer_state.json` during the run, so monitoring no longer depends on parsing raw terminal logs or waiting for the next checkpoint.
 
 ## Notes
 

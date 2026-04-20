@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,15 @@ class RunProgress:
     updated_at: str | None
     accuracy: float | None
     root: Path
+    current_step: int | None = None
+    max_steps: int | None = None
+    checkpoint_step: int | None = None
+    resumed_from_step: int | None = None
+    started_at: str | None = None
+    eta_at: str | None = None
+    latest_log: dict[str, Any] | None = None
+    latest_eval: dict[str, Any] | None = None
+    error: str | None = None
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -41,6 +51,55 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 def _resolve(repo_root: Path, relative: Path) -> Path:
     return relative if relative.is_absolute() else repo_root / relative
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _format_eta(
+    *,
+    started_at: str | None,
+    updated_at: str | None,
+    current_step: int | None,
+    max_steps: int | None,
+    resumed_from_step: int | None,
+) -> str | None:
+    if started_at is None or updated_at is None:
+        return None
+    if current_step is None or max_steps is None:
+        return None
+    baseline_step = resumed_from_step or 0
+    progressed_steps = current_step - baseline_step
+    remaining_steps = max_steps - current_step
+    if progressed_steps <= 0 or remaining_steps <= 0:
+        return None
+    started = _parse_iso(started_at)
+    updated = _parse_iso(updated_at)
+    if started is None or updated is None:
+        return None
+    elapsed_seconds = (updated - started).total_seconds()
+    if elapsed_seconds <= 0:
+        return None
+    seconds_per_step = elapsed_seconds / progressed_steps
+    eta = updated + timedelta(seconds=seconds_per_step * remaining_steps)
+    return eta.isoformat()
+
+
+def _checkpoint_step(run_root: Path) -> int | None:
+    checkpoints = sorted(run_root.glob("checkpoint-*"))
+    if not checkpoints:
+        return None
+    try:
+        return int(checkpoints[-1].name.split("-", maxsplit=1)[1])
+    except (IndexError, ValueError):
+        return None
 
 
 def _evaluation_progress(repo_root: Path, config_paths: list[Path]) -> RunProgress:
@@ -65,14 +124,46 @@ def _training_progress(repo_root: Path, config_paths: list[Path]) -> RunProgress
     settings = load_settings(absolute_configs)
     run_root = training_run_root(repo_root, settings)
     state = _read_json(run_root / "trainer_state.json") or {}
-    label = f"{absolute_configs[-2].stem} x {absolute_configs[-1].stem}"
+    latest_checkpoint_state = None
+    latest_checkpoint = sorted(run_root.glob("checkpoint-*/trainer_state.json"))
+    if latest_checkpoint:
+        latest_checkpoint_state = _read_json(latest_checkpoint[-1]) or {}
+    label = f"{settings.model_slug} x {settings.run_name}"
+    current_step = state.get("global_step")
+    if current_step is None and latest_checkpoint_state:
+        current_step = latest_checkpoint_state.get("global_step")
+    max_steps = state.get("max_steps")
+    if max_steps is None and latest_checkpoint_state:
+        max_steps = latest_checkpoint_state.get("max_steps")
+    checkpoint_step = state.get("checkpoint_step")
+    if checkpoint_step is None:
+        checkpoint_step = _checkpoint_step(run_root)
+    resumed_from_step = state.get("resumed_from_step")
+    started_at = state.get("started_at")
+    updated_at = state.get("updated_at")
+    eta_at = _format_eta(
+        started_at=started_at,
+        updated_at=updated_at,
+        current_step=int(current_step) if current_step is not None else None,
+        max_steps=int(max_steps) if max_steps is not None else None,
+        resumed_from_step=int(resumed_from_step) if resumed_from_step is not None else None,
+    )
     return RunProgress(
         label=label,
         status=str(state.get("status", "pending")),
         processed_count=int(state.get("train_rows", 0)),
-        updated_at=state.get("updated_at"),
+        updated_at=updated_at,
         accuracy=None,
         root=run_root,
+        current_step=int(current_step) if current_step is not None else None,
+        max_steps=int(max_steps) if max_steps is not None else None,
+        checkpoint_step=int(checkpoint_step) if checkpoint_step is not None else None,
+        resumed_from_step=int(resumed_from_step) if resumed_from_step is not None else None,
+        started_at=started_at,
+        eta_at=eta_at,
+        latest_log=state.get("latest_log"),
+        latest_eval=state.get("latest_eval"),
+        error=state.get("error"),
     )
 
 
@@ -120,8 +211,14 @@ def _stage_status(counts: dict[str, int]) -> str:
     return "pending"
 
 
-def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
+def summarize_project_progress(
+    repo_root: Path,
+    *,
+    training_overlays: list[Path] | None = None,
+) -> dict[str, Any]:
     repo_root = repo_root.resolve()
+    resolved_training_overlays = [_resolve(repo_root, path) for path in training_overlays or []]
+
     screening_runs = [
         _evaluation_progress(repo_root, [*COMMON_CONFIGS, model_config, experiment_config])
         for model_config, experiment_config in product(REAL_MODEL_CONFIGS, SCREENING_CONFIGS)
@@ -131,7 +228,10 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
         for model_config, experiment_config in product(BASELINE_MODEL_CONFIGS, SCREENING_CONFIGS)
     ]
     training_runs = [
-        _training_progress(repo_root, [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], training_config])
+        _training_progress(
+            repo_root,
+            [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], training_config, *resolved_training_overlays],
+        )
         for training_config in TRAINING_CONFIGS
     ]
     appendix_runs = [
@@ -157,6 +257,7 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
     active_screening = next((run for run in screening_runs if run.status == "running"), None)
     completed_screening = [run for run in screening_runs if run.status == "completed"]
     active_finalist = next((run for run in finalist_runs if run.status == "running"), None)
+    active_training = next((run for run in training_runs if run.status == "running"), None)
     best_completed = max(
         completed_screening,
         key=lambda run: run.accuracy if run.accuracy is not None else float("-inf"),
@@ -212,6 +313,9 @@ def summarize_project_progress(repo_root: Path) -> dict[str, Any]:
                     else "blocked until finalist selection completes"
                 )
             ),
+            "active_run": asdict(active_training) if active_training else None,
+            "runs": [asdict(run) for run in training_runs],
+            "training_overlays": [str(path) for path in resolved_training_overlays],
         },
         "appendix": {
             "counts": appendix_counts,
@@ -242,6 +346,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     training = summary["training"]
     appendix = summary["appendix"]
     prep = summary["prep"]
+
     def format_counts(counts: dict[str, int], *, total: int) -> str:
         parts = [
             f"{counts['completed']} completed",
@@ -281,43 +386,77 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         lines.append(
             f"- Best completed run so far: {best['label']} (accuracy {best['accuracy']:.3f})"
         )
-    lines.extend(
-        [
-            "",
-            "Next Stages",
-            (
-                "- Finalists: "
-                f"{format_counts(
-                    finalist_counts,
-                    total=finalist_counts['total'] or finalists['planned_runs'],
-                )}; "
-                f"{finalists['status']}"
-            ),
-            (
-                "- Training: "
-                f"{format_counts(
-                    training['counts'],
-                    total=training['counts']['total'],
-                )}; {training['status']}"
-            ),
-            (
-                "- Appendix: "
-                f"{format_counts(
-                    appendix['counts'],
-                    total=appendix['counts']['total'],
-                )}; {appendix['status']}"
-            ),
-        ]
-    )
+    lines.extend(["", "Next Stages"])
     finalist_active = finalists.get("active_run")
     if finalist_active:
-        lines.insert(
-            lines.index("Next Stages") + 2,
+        lines.append(
             "- Active finalist run: "
             f"{finalist_active['label']} "
             "("
             f"{finalist_active['processed_count']} processed, "
             f"updated {finalist_active['updated_at']}"
-            ")",
+            ")"
         )
+    lines.append(
+        "- Finalists: "
+        f"{format_counts(
+            finalist_counts,
+            total=finalist_counts['total'] or finalists['planned_runs'],
+        )}; "
+        f"{finalists['status']}"
+    )
+    training_active = training.get("active_run")
+    if training_active:
+        detail_parts = []
+        if (
+            training_active.get("current_step") is not None
+            and training_active.get("max_steps") is not None
+        ):
+            detail_parts.append(
+                f"{training_active['current_step']}/{training_active['max_steps']} steps"
+            )
+        if training_active.get("checkpoint_step") is not None:
+            detail_parts.append(f"checkpoint {training_active['checkpoint_step']}")
+        if training_active.get("updated_at") is not None:
+            detail_parts.append(f"updated {training_active['updated_at']}")
+        if training_active.get("eta_at") is not None:
+            detail_parts.append(f"ETA {training_active['eta_at']}")
+        lines.append(
+            "- Active training run: "
+            f"{training_active['label']} "
+            f"({', '.join(detail_parts)})"
+        )
+    lines.append(
+        "- Training: "
+        f"{format_counts(
+            training['counts'],
+            total=training['counts']['total'],
+        )}; {training['status']}"
+    )
+    lines.append(
+        "- Appendix: "
+        f"{format_counts(
+            appendix['counts'],
+            total=appendix['counts']['total'],
+        )}; {appendix['status']}"
+    )
+    training_runs = training.get("runs") or []
+    if training_runs:
+        lines.extend(["", "Training Run Details"])
+        for run in training_runs:
+            details: list[str] = []
+            if run.get("current_step") is not None and run.get("max_steps") is not None:
+                details.append(f"{run['current_step']}/{run['max_steps']} steps")
+            elif run.get("processed_count"):
+                details.append(f"{run['processed_count']} rows")
+            if run.get("checkpoint_step") is not None:
+                details.append(f"checkpoint {run['checkpoint_step']}")
+            if run.get("updated_at") is not None:
+                details.append(f"updated {run['updated_at']}")
+            if run.get("eta_at") is not None and run.get("status") == "running":
+                details.append(f"ETA {run['eta_at']}")
+            suffix = f" ({', '.join(details)})" if details else ""
+            lines.append(f"- {run['label']}: {run['status']}{suffix}")
+            if run.get("error"):
+                lines.append(f"  error: {run['error']}")
     return "\n".join(lines)
