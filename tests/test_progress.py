@@ -95,12 +95,17 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Active training run" in report
     assert "128/1024 steps" in report
     assert "Training Run Details" in report
+    assert "updated Apr 20 2:00 PM ET" in report
+    assert "ETA 2h 0m" in report
+    assert "2026-04-20T18:00:00+00:00" not in report
 
     training_report = render_training_report(summary)
 
     assert "TextVQA Training Progress" in training_report
     assert "Per-Run Detail" in training_report
     assert "qwen25_vl_3b x core_all_linear_r16_seed07: running" in training_report
+    assert "updated Apr 20 2:00 PM ET" in training_report
+    assert "ETA 2h 0m" in training_report
     assert "Screening" not in training_report
 
 
@@ -137,4 +142,5 @@ def test_render_training_report_treats_starting_workers_as_running_stage() -> No
     assert "1 running" in training_report
     assert "blocked until finalist selection completes" not in training_report
     assert "qwen25_vl_3b x core_all_linear_r16_seed07: starting" in training_report
+    assert "updated Apr 20 6:39 PM ET" in training_report
     assert "gpu 0" in training_report

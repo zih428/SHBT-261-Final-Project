@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from itertools import product
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from textvqa_proj.config import load_settings
 from textvqa_proj.orchestration import evaluation_run_root, training_run_root
@@ -23,6 +24,7 @@ BASELINE_MODEL_CONFIGS = [Path("configs/models/ocr_lexical.toml")]
 SCREENING_CONFIGS = sorted(Path("configs/experiments/screening").glob("*.toml"))
 TRAINING_CONFIGS = sorted(Path("configs/experiments/training").glob("*.toml"))
 APPENDIX_CONFIGS = sorted(Path("configs/experiments/appendix").glob("*.toml"))
+EASTERN_TZ = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +65,36 @@ def _parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+
+def _format_short_eastern(value: str | None) -> str | None:
+    parsed = _parse_iso(value)
+    if parsed is None:
+        return value
+    eastern = parsed.astimezone(EASTERN_TZ)
+    month = eastern.strftime("%b")
+    day = eastern.day
+    hour = eastern.hour % 12 or 12
+    minute = eastern.minute
+    meridiem = "AM" if eastern.hour < 12 else "PM"
+    return f"{month} {day} {hour}:{minute:02d} {meridiem} ET"
+
+
+def _format_eta_duration(*, updated_at: str | None, eta_at: str | None) -> str | None:
+    updated = _parse_iso(updated_at)
+    eta = _parse_iso(eta_at)
+    if updated is None or eta is None:
+        return None
+    remaining = eta - updated
+    total_seconds = int(remaining.total_seconds())
+    if total_seconds <= 0:
+        return "<1m"
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes = remainder // 60
+    if hours <= 0:
+        minutes = max(1, minutes)
+        return f"{minutes}m"
+    return f"{hours}h {minutes}m"
 
 
 def _pid_is_alive(pid: int | None) -> bool:
@@ -493,7 +525,10 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         lines.append(
             "- Active run: "
             f"{active['label']} "
-            f"({active['processed_count']} processed, updated {active['updated_at']})"
+            "("
+            f"{active['processed_count']} processed, "
+            f"updated {_format_short_eastern(active['updated_at']) or active['updated_at']}"
+            ")"
         )
     best = screening.get("best_completed_run")
     if best and best["accuracy"] is not None:
@@ -503,12 +538,15 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     lines.extend(["", "Next Stages"])
     finalist_active = finalists.get("active_run")
     if finalist_active:
+        finalist_updated = (
+            _format_short_eastern(finalist_active["updated_at"]) or finalist_active["updated_at"]
+        )
         lines.append(
             "- Active finalist run: "
             f"{finalist_active['label']} "
             "("
             f"{finalist_active['processed_count']} processed, "
-            f"updated {finalist_active['updated_at']}"
+            f"updated {finalist_updated}"
             ")"
         )
     lines.append(
@@ -532,9 +570,19 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         if training_active.get("checkpoint_step") is not None:
             detail_parts.append(f"checkpoint {training_active['checkpoint_step']}")
         if training_active.get("updated_at") is not None:
-            detail_parts.append(f"updated {training_active['updated_at']}")
-        if training_active.get("eta_at") is not None:
-            detail_parts.append(f"ETA {training_active['eta_at']}")
+            detail_parts.append(
+                "updated "
+                + (
+                    _format_short_eastern(training_active["updated_at"])
+                    or training_active["updated_at"]
+                )
+            )
+        eta_duration = _format_eta_duration(
+            updated_at=training_active.get("updated_at"),
+            eta_at=training_active.get("eta_at"),
+        )
+        if eta_duration is not None:
+            detail_parts.append(f"ETA {eta_duration}")
         lines.append(
             "- Active training run: "
             f"{training_active['label']} "
@@ -566,9 +614,16 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             if run.get("checkpoint_step") is not None:
                 details.append(f"checkpoint {run['checkpoint_step']}")
             if run.get("updated_at") is not None:
-                details.append(f"updated {run['updated_at']}")
-            if run.get("eta_at") is not None and run.get("status") == "running":
-                details.append(f"ETA {run['eta_at']}")
+                details.append(
+                    "updated "
+                    + (_format_short_eastern(run["updated_at"]) or run["updated_at"])
+                )
+            eta_duration = _format_eta_duration(
+                updated_at=run.get("updated_at"),
+                eta_at=run.get("eta_at"),
+            )
+            if eta_duration is not None and run.get("status") == "running":
+                details.append(f"ETA {eta_duration}")
             suffix = f" ({', '.join(details)})" if details else ""
             lines.append(f"- {run['label']}: {run['status']}{suffix}")
             if run.get("error"):
@@ -609,9 +664,15 @@ def render_training_report(summary: dict[str, Any]) -> str:
         if active.get("checkpoint_step") is not None:
             details.append(f"checkpoint {active['checkpoint_step']}")
         if active.get("updated_at") is not None:
-            details.append(f"updated {active['updated_at']}")
-        if active.get("eta_at") is not None:
-            details.append(f"ETA {active['eta_at']}")
+            details.append(
+                "updated " + (_format_short_eastern(active["updated_at"]) or active["updated_at"])
+            )
+        eta_duration = _format_eta_duration(
+            updated_at=active.get("updated_at"),
+            eta_at=active.get("eta_at"),
+        )
+        if eta_duration is not None:
+            details.append(f"ETA {eta_duration}")
         lines.append(f"- Active run: {active['label']} ({', '.join(details)})")
 
     lines.extend(["", "Per-Run Detail"])
@@ -622,9 +683,15 @@ def render_training_report(summary: dict[str, Any]) -> str:
         if run.get("checkpoint_step") is not None:
             details.append(f"checkpoint {run['checkpoint_step']}")
         if run.get("updated_at") is not None:
-            details.append(f"updated {run['updated_at']}")
-        if run.get("eta_at") is not None and run.get("status") == "running":
-            details.append(f"ETA {run['eta_at']}")
+            details.append(
+                "updated " + (_format_short_eastern(run["updated_at"]) or run["updated_at"])
+            )
+        eta_duration = _format_eta_duration(
+            updated_at=run.get("updated_at"),
+            eta_at=run.get("eta_at"),
+        )
+        if eta_duration is not None and run.get("status") == "running":
+            details.append(f"ETA {eta_duration}")
         latest_log = run.get("latest_log")
         if run.get("status") == "starting" and latest_log and latest_log.get("gpu_id") is not None:
             details.append(f"gpu {latest_log['gpu_id']}")
