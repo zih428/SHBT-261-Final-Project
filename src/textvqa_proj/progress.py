@@ -460,3 +460,53 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             if run.get("error"):
                 lines.append(f"  error: {run['error']}")
     return "\n".join(lines)
+
+
+def render_training_report(summary: dict[str, Any]) -> str:
+    training = summary["training"]
+    counts = training["counts"]
+
+    def format_counts(counts: dict[str, int]) -> str:
+        parts = [
+            f"{counts['completed']} completed",
+            f"{counts['running']} running",
+            f"{counts['pending']} pending",
+        ]
+        if counts.get("failed", 0):
+            parts.append(f"{counts['failed']} failed")
+        return ", ".join(parts) + f" (total {counts['total']})"
+
+    lines = [
+        "TextVQA Training Progress",
+        "",
+        f"- Training: {format_counts(counts)}; {training['status']}",
+    ]
+    active = training.get("active_run")
+    if active:
+        details: list[str] = []
+        if active.get("current_step") is not None and active.get("max_steps") is not None:
+            details.append(f"{active['current_step']}/{active['max_steps']} steps")
+        if active.get("checkpoint_step") is not None:
+            details.append(f"checkpoint {active['checkpoint_step']}")
+        if active.get("updated_at") is not None:
+            details.append(f"updated {active['updated_at']}")
+        if active.get("eta_at") is not None:
+            details.append(f"ETA {active['eta_at']}")
+        lines.append(f"- Active run: {active['label']} ({', '.join(details)})")
+
+    lines.extend(["", "Per-Run Detail"])
+    for run in training.get("runs") or []:
+        details: list[str] = []
+        if run.get("current_step") is not None and run.get("max_steps") is not None:
+            details.append(f"{run['current_step']}/{run['max_steps']} steps")
+        if run.get("checkpoint_step") is not None:
+            details.append(f"checkpoint {run['checkpoint_step']}")
+        if run.get("updated_at") is not None:
+            details.append(f"updated {run['updated_at']}")
+        if run.get("eta_at") is not None and run.get("status") == "running":
+            details.append(f"ETA {run['eta_at']}")
+        suffix = f" ({', '.join(details)})" if details else ""
+        lines.append(f"- {run['label']}: {run['status']}{suffix}")
+        if run.get("error"):
+            lines.append(f"  error: {run['error']}")
+    return "\n".join(lines)

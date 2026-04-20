@@ -199,6 +199,14 @@ To monitor remote training with per-run detail instead of only stage-level total
   --training-config configs/runtime_cuda_runpod.toml
 ```
 
+On the remote pod, where the completed local evaluation outputs are intentionally absent, use the training-only view:
+
+```bash
+.venv/bin/python scripts/progress_report.py \
+  --training-config configs/runtime_cuda_runpod.toml \
+  --training-only
+```
+
 That report now includes:
 
 - the active training run and current step/max step

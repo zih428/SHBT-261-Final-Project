@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from textvqa_proj.progress import render_progress_report
+from textvqa_proj.progress import render_progress_report, render_training_report
 
 
 def test_render_progress_report_mentions_stage_counts() -> None:
@@ -95,3 +95,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Active training run" in report
     assert "128/1024 steps" in report
     assert "Training Run Details" in report
+
+    training_report = render_training_report(summary)
+
+    assert "TextVQA Training Progress" in training_report
+    assert "Per-Run Detail" in training_report
+    assert "qwen25_vl_3b x core_all_linear_r16_seed07: running" in training_report
+    assert "Screening" not in training_report

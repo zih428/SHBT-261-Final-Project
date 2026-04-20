@@ -11,7 +11,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from textvqa_proj.progress import render_progress_report, summarize_project_progress
+from textvqa_proj.progress import (
+    render_progress_report,
+    render_training_report,
+    summarize_project_progress,
+)
 from textvqa_proj.utils.io import json_default
 
 
@@ -33,6 +37,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the raw JSON summary instead of the human-readable report.",
     )
+    parser.add_argument(
+        "--training-only",
+        action="store_true",
+        help="Print only the training-stage report. Useful on remote GPU workers.",
+    )
     return parser.parse_args()
 
 
@@ -44,6 +53,9 @@ def main() -> None:
     )
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True, default=json_default))
+        return
+    if args.training_only:
+        print(render_training_report(summary))
         return
     print(render_progress_report(summary))
 
