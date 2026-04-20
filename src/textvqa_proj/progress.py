@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
@@ -62,6 +63,16 @@ def _parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+
+def _pid_is_alive(pid: int | None) -> bool:
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
 
 
 def _format_eta(
@@ -250,10 +261,12 @@ def _latest_training_matrix_status(repo_root: Path) -> dict[str, Any] | None:
                 config_name = item.get("config")
                 if not config_name:
                     continue
+                pid = item.get("pid")
+                is_alive = _pid_is_alive(int(pid)) if pid is not None else False
                 status["runs"][config_name] = {
-                    "status": "starting",
+                    "status": "starting" if is_alive else "failed",
                     "gpu_id": item.get("gpu_id"),
-                    "pid": item.get("pid"),
+                    "pid": pid,
                     "log_path": item.get("log_path"),
                     "updated_at": updated_at,
                     "phase": payload.get("phase"),
