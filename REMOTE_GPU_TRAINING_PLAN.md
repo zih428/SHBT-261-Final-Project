@@ -151,14 +151,14 @@ Those remain local and canonical.
 
 ### Phase 1: vendor setup
 
-Use **Lambda On-Demand Cloud**.
+Use **RunPod on-demand**.
 
 Start with:
 
-- `1x A6000 48 GB` if you want lower cost
-- or `1x A100 40 GB` if you want safer headroom and likely faster throughput
+- `2x H100 80 GB` for the balanced parallel plan now chosen for this repo
+- keep the pod on-demand rather than interruptible for the final matrix
 
-Use an **on-demand** instance, not an interruptible/spot-style instance, for the final matrix.
+Use a persistent `/workspace` volume and run the actual launcher inside `tmux` so the remote jobs survive SSH disconnects cleanly.
 
 ### Phase 2: freeze the experiment boundary
 
@@ -171,7 +171,15 @@ Before the remote rerun begins:
 
 This keeps the remote training outputs separate from the existing local MPS attempts.
 
-### Phase 3: remote pilot
+### Phase 3: remote cache prewarm and pilot
+
+Before the multi-GPU launch, prewarm the Hugging Face cache for `Qwen/Qwen2.5-VL-3B-Instruct`.
+
+Purpose of the prewarm:
+
+- avoid two workers racing the same first-time shard download
+- make the first launcher phase start from local cache instead of public-Hub fetches
+- reduce the chance that startup failures happen before `trainer_state.json` exists
 
 Before launching the full matrix, run **one pilot training job** on the rental GPU.
 
@@ -189,9 +197,16 @@ Purpose of the pilot:
 
 This pilot is still scientifically fine because it is one of the planned `12` configs. If it looks healthy, the full matrix can proceed.
 
-### Phase 4: full rerun of the `12` training jobs
+### Phase 4: staged parallel rerun of the `12` training jobs
 
-Run **all 12 training configs from scratch** on the rental GPU using the new run tag.
+Run **all 12 training configs from scratch** on the rental GPUs using the new run tag.
+
+Recommended execution order on `2x H100`:
+
+1. `core-matrix` phase on both GPUs in parallel
+2. confirm the winner is still the expected backbone/prompt variant
+3. `ocr-ablation` phase on both GPUs in parallel
+4. `data-scaling` phase on both GPUs in parallel
 
 That means the final reported training results come entirely from:
 
@@ -249,7 +264,7 @@ Once you have account access and a reachable instance, I can handle the technica
 2. Prepare the exact sync commands for the repo and data.
 3. Set up the repo on the remote machine.
 4. Install the Python environment and CUDA-side dependencies.
-5. Warm the model cache if needed.
+5. Warm the model cache before the first parallel launch.
 6. Run the pilot benchmark.
 7. Tune the remote worker count if a short benchmark says it helps.
 8. Launch the `12` training jobs.
@@ -259,26 +274,16 @@ Once you have account access and a reachable instance, I can handle the technica
 
 ## Recommended vendor choice summary
 
-### Best overall choice
-
-**Lambda On-Demand Cloud**
-
-Use this if the priorities are:
-
-- minimal adaptation from the current `.py` / CLI workflow
-- scientific cleanliness
-- predictable VM behavior
-- low operational friction
-
-### Best cheaper fallback
+### Chosen venue
 
 **RunPod Secure Cloud**
 
-Use this if the priorities are:
+This is now the right venue for this repo because:
 
-- lower cost than Lambda
-- still acceptable SSH/script workflow
-- willingness to accept a little more infrastructure setup complexity
+- the pod is already provisioned
+- the repo is script-first rather than notebook-first
+- the selected hardware is `2x H100 80 GB`, which is enough to run two independent training jobs in parallel
+- the scientific plan remains clean as long as we keep the remote training outputs in their own CUDA run namespace
 
 ### Do not use as the primary final-matrix venue
 
@@ -289,10 +294,11 @@ Use this if the priorities are:
 
 The recommended next action is:
 
-1. Create a **Lambda Cloud** account.
-2. Launch **one** on-demand instance:
-   - preferably `1x A6000 48 GB`
-   - or `1x A100 40 GB` if you want the safer/faster option
-3. Give me the instance SSH access path once it exists.
+1. Keep the existing **RunPod** pod on-demand.
+2. Use the committed remote override config and staged launcher:
+   - `core-matrix` first
+   - then `ocr-ablation`
+   - then `data-scaling`
+3. Stop the pod whenever no active phase is running.
 
-At that point, I can take over the technical migration and prepare the remote training run properly.
+At that point, the remote training run can proceed as the canonical final training stage.

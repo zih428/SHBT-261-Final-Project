@@ -92,6 +92,16 @@ def parse_args() -> argparse.Namespace:
         help="Stop after the named phase completes.",
     )
     parser.add_argument(
+        "--prewarm-repo-id",
+        dest="prewarm_repo_ids",
+        action="append",
+        default=[],
+        help=(
+            "Pre-download a Hugging Face repo into the shared cache before starting workers. "
+            "Useful on fresh remote GPU pods to avoid multiple workers racing the same model fetch."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the planned launches without starting subprocesses.",
@@ -141,6 +151,22 @@ def _log_summary(path: Path, payload: dict[str, object]) -> None:
     atomic_write_json(path, payload)
 
 
+def _prewarm_repo(repo_id: str) -> None:
+    from huggingface_hub import snapshot_download
+
+    allow_patterns = [
+        "*.json",
+        "*.txt",
+        "*.model",
+        "*.tiktoken",
+        "*.safetensors",
+        "*.jinja",
+    ]
+    print(f"[prewarm] {repo_id}", flush=True)
+    snapshot_download(repo_id=repo_id, allow_patterns=allow_patterns)
+    print(f"[prewarm-done] {repo_id}", flush=True)
+
+
 def _start_job(
     *,
     gpu_id: str,
@@ -153,8 +179,8 @@ def _start_job(
     config_paths = build_config_paths(training_config, extra_configs)
     label = f"{phase}-{training_config.stem}-gpu{gpu_id}"
     command = [sys.executable, "-m", "textvqa_proj.cli", "train", *config_args(config_paths)]
-    print(f"[run] {label}")
-    print("       " + " ".join(command))
+    print(f"[run] {label}", flush=True)
+    print("       " + " ".join(command), flush=True)
     if dry_run:
         return None
     log_path = log_root / f"{label}.log"
@@ -206,6 +232,7 @@ def run_phase(
     completed: list[str] = []
     failed: list[str] = []
     skipped: list[str] = []
+    launch_counter = 0
     phase_summary_path = log_root / f"{phase}_summary.json"
 
     def write_phase_summary() -> None:
@@ -236,12 +263,16 @@ def run_phase(
             training_config = pending.pop(0)
             config_paths = build_config_paths(training_config, extra_configs)
             if training_completed(REPO_ROOT, config_paths):
-                print(f"[skip] {phase} {training_config.stem}")
+                print(f"[skip] {phase} {training_config.stem}", flush=True)
                 skipped.append(training_config.stem)
                 write_phase_summary()
                 continue
-            busy_gpu_ids = {job.gpu_id for job in active}
-            free_gpu_id = next(gpu_id for gpu_id in gpu_ids if gpu_id not in busy_gpu_ids)
+            if dry_run:
+                free_gpu_id = gpu_ids[launch_counter % max_parallel]
+                launch_counter += 1
+            else:
+                busy_gpu_ids = {job.gpu_id for job in active}
+                free_gpu_id = next(gpu_id for gpu_id in gpu_ids if gpu_id not in busy_gpu_ids)
             job = _start_job(
                 gpu_id=free_gpu_id,
                 phase=phase,
@@ -271,10 +302,10 @@ def run_phase(
             finished.append(job)
             if return_code == 0:
                 completed.append(job.config_path.stem)
-                print(f"[done] {job.label}")
+                print(f"[done] {job.label}", flush=True)
             else:
                 failed.append(job.config_path.stem)
-                print(f"[failed] {job.label} (exit {return_code})")
+                print(f"[failed] {job.label} (exit {return_code})", flush=True)
             _close_job(job)
 
         if finished:
@@ -312,6 +343,7 @@ def main() -> int:
             "gpu_ids": gpu_ids,
             "max_parallel": max_parallel,
             "extra_configs": [str(path) for path in extra_configs],
+            "prewarm_repo_ids": args.prewarm_repo_ids,
             "phases": {
                 phase: [str(path) for path in configs]
                 for phase, configs in selected_phases
@@ -321,9 +353,13 @@ def main() -> int:
         },
     )
 
+    if not args.dry_run:
+        for repo_id in args.prewarm_repo_ids:
+            _prewarm_repo(repo_id)
+
     overall_failed: list[str] = []
     for phase, configs in selected_phases:
-        print(f"[phase] {phase} ({len(configs)} configs)")
+        print(f"[phase] {phase} ({len(configs)} configs)", flush=True)
         summary = run_phase(
             phase=phase,
             configs=configs,

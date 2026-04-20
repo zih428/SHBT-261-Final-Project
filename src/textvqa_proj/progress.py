@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from itertools import product
 from pathlib import Path
@@ -27,6 +27,7 @@ APPENDIX_CONFIGS = sorted(Path("configs/experiments/appendix").glob("*.toml"))
 @dataclass(frozen=True, slots=True)
 class RunProgress:
     label: str
+    config_name: str
     status: str
     processed_count: int
     updated_at: str | None
@@ -111,6 +112,7 @@ def _evaluation_progress(repo_root: Path, config_paths: list[Path]) -> RunProgre
     label = f"{absolute_configs[-2].stem} x {absolute_configs[-1].stem}"
     return RunProgress(
         label=label,
+        config_name=absolute_configs[-1].stem,
         status=str(progress.get("status", "pending")),
         processed_count=int(progress.get("processed_count", 0)),
         updated_at=progress.get("updated_at"),
@@ -119,7 +121,12 @@ def _evaluation_progress(repo_root: Path, config_paths: list[Path]) -> RunProgre
     )
 
 
-def _training_progress(repo_root: Path, config_paths: list[Path]) -> RunProgress:
+def _training_progress(
+    repo_root: Path,
+    config_paths: list[Path],
+    *,
+    config_name: str,
+) -> RunProgress:
     absolute_configs = [_resolve(repo_root, path) for path in config_paths]
     settings = load_settings(absolute_configs)
     run_root = training_run_root(repo_root, settings)
@@ -150,6 +157,7 @@ def _training_progress(repo_root: Path, config_paths: list[Path]) -> RunProgress
     )
     return RunProgress(
         label=label,
+        config_name=config_name,
         status=str(state.get("status", "pending")),
         processed_count=int(state.get("train_rows", 0)),
         updated_at=updated_at,
@@ -170,7 +178,7 @@ def _training_progress(repo_root: Path, config_paths: list[Path]) -> RunProgress
 def _summarize_statuses(runs: list[RunProgress]) -> dict[str, int]:
     counts = Counter(run.status for run in runs)
     completed = counts.get("completed", 0)
-    running = counts.get("running", 0)
+    running = counts.get("running", 0) + counts.get("starting", 0)
     pending = counts.get("pending", 0)
     failed = counts.get("failed", 0)
     return {
@@ -211,6 +219,94 @@ def _stage_status(counts: dict[str, int]) -> str:
     return "pending"
 
 
+def _latest_training_matrix_status(repo_root: Path) -> dict[str, Any] | None:
+    log_root = repo_root / "outputs/logs/training_matrix"
+    if not log_root.exists():
+        return None
+    launch_dirs = sorted(
+        (path for path in log_root.iterdir() if path.is_dir()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for launch_dir in launch_dirs:
+        phase_summaries = sorted(launch_dir.glob("*_summary.json"))
+        if not phase_summaries:
+            continue
+        status: dict[str, Any] = {
+            "launch_dir": str(launch_dir),
+            "updated_at": None,
+            "runs": {},
+        }
+        for summary_path in phase_summaries:
+            payload = _read_json(summary_path)
+            if not payload:
+                continue
+            updated_at = payload.get("updated_at")
+            if updated_at and (
+                status["updated_at"] is None or updated_at > status["updated_at"]
+            ):
+                status["updated_at"] = updated_at
+            for item in payload.get("active", []):
+                config_name = item.get("config")
+                if not config_name:
+                    continue
+                status["runs"][config_name] = {
+                    "status": "starting",
+                    "gpu_id": item.get("gpu_id"),
+                    "pid": item.get("pid"),
+                    "log_path": item.get("log_path"),
+                    "updated_at": updated_at,
+                    "phase": payload.get("phase"),
+                }
+            for config_name in payload.get("failed", []):
+                status["runs"][config_name] = {
+                    "status": "failed",
+                    "updated_at": updated_at,
+                    "phase": payload.get("phase"),
+                }
+        if status["runs"]:
+            return status
+    return None
+
+
+def _overlay_training_matrix_status(
+    runs: list[RunProgress], training_matrix_status: dict[str, Any] | None
+) -> list[RunProgress]:
+    if not training_matrix_status:
+        return runs
+    overlay_runs: dict[str, Any] = training_matrix_status.get("runs", {})
+    merged: list[RunProgress] = []
+    for run in runs:
+        overlay = overlay_runs.get(run.config_name)
+        if not overlay or run.status != "pending":
+            merged.append(run)
+            continue
+        status = overlay.get("status", run.status)
+        if status not in {"starting", "failed"}:
+            merged.append(run)
+            continue
+        latest_log = {
+            "path": overlay.get("log_path"),
+            "gpu_id": overlay.get("gpu_id"),
+            "pid": overlay.get("pid"),
+            "phase": overlay.get("phase"),
+        }
+        merged.append(
+            replace(
+                run,
+                status=status,
+                updated_at=overlay.get("updated_at") or run.updated_at,
+                latest_log=latest_log,
+                error=(
+                    "Worker exited before trainer state was written."
+                    if status == "failed"
+                    else run.error
+                ),
+            )
+        )
+    return merged
+
+
 def summarize_project_progress(
     repo_root: Path,
     *,
@@ -231,9 +327,14 @@ def summarize_project_progress(
         _training_progress(
             repo_root,
             [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], training_config, *resolved_training_overlays],
+            config_name=training_config.stem,
         )
         for training_config in TRAINING_CONFIGS
     ]
+    training_runs = _overlay_training_matrix_status(
+        training_runs,
+        _latest_training_matrix_status(repo_root),
+    )
     appendix_runs = [
         _evaluation_progress(repo_root, [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], appendix_config])
         for appendix_config in APPENDIX_CONFIGS
@@ -476,10 +577,16 @@ def render_training_report(summary: dict[str, Any]) -> str:
             parts.append(f"{counts['failed']} failed")
         return ", ".join(parts) + f" (total {counts['total']})"
 
+    status = (
+        _stage_status(counts)
+        if counts["running"] > 0 or counts["failed"] > 0 or counts["completed"] > 0
+        else "pending"
+    )
+
     lines = [
         "TextVQA Training Progress",
         "",
-        f"- Training: {format_counts(counts)}; {training['status']}",
+        f"- Training: {format_counts(counts)}; {status}",
     ]
     active = training.get("active_run")
     if active:
@@ -505,6 +612,9 @@ def render_training_report(summary: dict[str, Any]) -> str:
             details.append(f"updated {run['updated_at']}")
         if run.get("eta_at") is not None and run.get("status") == "running":
             details.append(f"ETA {run['eta_at']}")
+        latest_log = run.get("latest_log")
+        if run.get("status") == "starting" and latest_log and latest_log.get("gpu_id") is not None:
+            details.append(f"gpu {latest_log['gpu_id']}")
         suffix = f" ({', '.join(details)})" if details else ""
         lines.append(f"- {run['label']}: {run['status']}{suffix}")
         if run.get("error"):

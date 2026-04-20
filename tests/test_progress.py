@@ -102,3 +102,39 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Per-Run Detail" in training_report
     assert "qwen25_vl_3b x core_all_linear_r16_seed07: running" in training_report
     assert "Screening" not in training_report
+
+
+def test_render_training_report_treats_starting_workers_as_running_stage() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 0,
+                "running": 1,
+                "pending": 11,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "blocked until finalist selection completes",
+            "active_run": None,
+            "runs": [
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                    "status": "starting",
+                    "latest_log": {"gpu_id": "0"},
+                    "updated_at": "2026-04-20T22:39:42+00:00",
+                },
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed13",
+                    "status": "pending",
+                },
+            ],
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "1 running" in training_report
+    assert "blocked until finalist selection completes" not in training_report
+    assert "qwen25_vl_3b x core_all_linear_r16_seed07: starting" in training_report
+    assert "gpu 0" in training_report
