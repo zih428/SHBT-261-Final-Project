@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from textvqa_proj.config import GenerationSettings
@@ -8,7 +9,7 @@ from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.models.base import BaseModelAdapter, build_generation_kwargs
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
-from textvqa_proj.utils.hf import local_files_only
+from textvqa_proj.utils.hf import local_files_only, resolve_pretrained_source
 from textvqa_proj.utils.perf import release_torch_cache
 
 
@@ -34,17 +35,37 @@ class Qwen25VLAdapter(BaseModelAdapter):
                 "transformers and qwen-vl-utils are required for the Qwen2.5-VL adapter"
             ) from exc
 
+        model_source = resolve_pretrained_source(
+            self.settings.model.model_name,
+            revision=self.settings.model.revision,
+            local_only=local_files_only(self.settings),
+        )
         model_kwargs: dict[str, Any] = {
             "torch_dtype": getattr(torch, self.settings.model.torch_dtype, "auto"),
             "trust_remote_code": self.settings.model.trust_remote_code,
-            "local_files_only": local_files_only(self.settings),
             "low_cpu_mem_usage": True,
         }
+        if self.settings.model.adapter_path is None:
+            model_kwargs["local_files_only"] = local_files_only(self.settings)
+            model_kwargs["revision"] = self.settings.model.revision
+        else:
+            model_kwargs["local_files_only"] = True
         self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.settings.model.model_name,
-            revision=self.settings.model.revision,
+            model_source,
             **model_kwargs,
         )
+        if self.settings.model.adapter_path:
+            try:
+                from peft import PeftModel
+            except ImportError as exc:
+                raise RuntimeError(
+                    "peft is required to load a saved LoRA adapter for Qwen2.5-VL"
+                ) from exc
+            self._model = PeftModel.from_pretrained(
+                self._model,
+                self.settings.model.adapter_path,
+                is_trainable=False,
+            )
         self._model.to(self._device)
         self._model.eval()
 
@@ -53,10 +74,22 @@ class Qwen25VLAdapter(BaseModelAdapter):
             processor_kwargs["min_pixels"] = self.settings.model.min_pixels
         if self.settings.model.max_pixels is not None:
             processor_kwargs["max_pixels"] = self.settings.model.max_pixels
+        processor_source = self.settings.model.processor_path
+        if processor_source is None:
+            processor_source_name = self.settings.model.processor_name or self.settings.model.model_name
+            processor_source = resolve_pretrained_source(
+                processor_source_name,
+                revision=self.settings.model.revision,
+                local_only=local_files_only(self.settings),
+            )
+        processor_path = processor_source
+        processor_kwargs["local_files_only"] = Path(processor_path).exists() or local_files_only(
+            self.settings
+        )
+        if not Path(processor_path).exists():
+            processor_kwargs["revision"] = self.settings.model.revision
         self._processor = AutoProcessor.from_pretrained(
-            self.settings.model.processor_name or self.settings.model.model_name,
-            revision=self.settings.model.revision,
-            local_files_only=local_files_only(self.settings),
+            processor_path,
             **processor_kwargs,
         )
         if hasattr(self._processor, "tokenizer"):

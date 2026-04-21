@@ -48,6 +48,8 @@ class ModelSettings:
     adapter: str = "fake"
     model_name: str = "debug/fake-answerer"
     processor_name: str | None = None
+    adapter_path: str | None = None
+    processor_path: str | None = None
     revision: str = "main"
     torch_dtype: str = "float16"
     trust_remote_code: bool = False
@@ -180,7 +182,7 @@ class Settings:
         return max(1, self.experiment.batch_size)
 
 
-def _build_settings(raw: dict[str, Any]) -> Settings:
+def settings_from_dict(raw: dict[str, Any]) -> Settings:
     return Settings(
         runtime=RuntimeSettings(**raw.get("runtime", {})),
         data=DataSettings(**raw.get("data", {})),
@@ -199,4 +201,4 @@ def load_settings(config_paths: list[Path]) -> Settings:
         with config_path.open("rb") as handle:
             parsed = tomllib.load(handle)
         merged = _merge_dicts(merged, parsed)
-    return _build_settings(merged)
+    return settings_from_dict(merged)

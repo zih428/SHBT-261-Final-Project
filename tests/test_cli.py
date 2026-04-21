@@ -1,7 +1,9 @@
 import subprocess
 import sys
+import json
 from pathlib import Path
 
+from textvqa_proj.config import Settings
 from textvqa_proj.data.dataset import TextVQASample, write_manifest
 
 
@@ -71,4 +73,55 @@ def test_cli_validate_and_evaluate(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
+    assert "accuracy" in evaluate.stdout
+
+
+def test_cli_evaluate_trained_adapter(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.jsonl"
+    write_manifest(
+        manifest_path,
+        [
+            TextVQASample(
+                sample_id="1",
+                question="What word is on the sign?",
+                image="dummy.jpg",
+                answers=("open",),
+                ocr_tokens=("OPEN",),
+            )
+        ],
+    )
+    training_root = tmp_path / "training-run"
+    (training_root / "adapter").mkdir(parents=True)
+    (training_root / "processor").mkdir()
+
+    settings = Settings()
+    settings.model.adapter = "fake"
+    settings.data.internal_dev_manifest_path = str(manifest_path)
+    settings.runtime.output_root = str(tmp_path / "ignored-by-helper")
+    settings.experiment.name = "lora-core-matrix"
+    settings.experiment.run_name = "all-linear-r16-seed07"
+    settings.training.run_tag = "train-speed-v3"
+    (training_root / "settings.json").write_text(
+        json.dumps(settings.to_dict()),
+        encoding="utf-8",
+    )
+
+    evaluate = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "textvqa_proj.cli",
+            "evaluate-trained-adapter",
+            "--training-root",
+            str(training_root),
+            "--split",
+            "internal_dev",
+            "--output-root",
+            str(tmp_path / "trained-evals"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
     assert "accuracy" in evaluate.stdout

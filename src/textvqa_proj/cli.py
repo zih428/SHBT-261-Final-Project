@@ -11,6 +11,7 @@ from textvqa_proj.data.prepare import (
 )
 from textvqa_proj.inference.runner import ExperimentRunner, load_samples_for_settings
 from textvqa_proj.models.registry import create_adapter
+from textvqa_proj.training.post_eval import evaluate_trained_adapter
 from textvqa_proj.training.runner import run_training
 from textvqa_proj.utils.logging import configure_logging
 
@@ -61,6 +62,38 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("evaluate", help="Run resumable evaluation.")
     add_config_args(evaluate)
 
+    evaluate_trained = subparsers.add_parser(
+        "evaluate-trained-adapter",
+        help="Evaluate a saved training artifact as a resumable inference run.",
+    )
+    evaluate_trained.add_argument("--training-root", required=True)
+    evaluate_trained.add_argument(
+        "--split",
+        required=True,
+        choices=("internal_dev", "validation", "train", "test"),
+    )
+    evaluate_trained.add_argument(
+        "--output-root",
+        default="outputs/runs/trained_adapters",
+        help="Root directory for trained-adapter evaluation outputs.",
+    )
+    evaluate_trained.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional sample limit for smoke checks.",
+    )
+    evaluate_trained.add_argument(
+        "--run-name",
+        default=None,
+        help="Optional explicit run_name override for the evaluation output.",
+    )
+    evaluate_trained.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable resumable evaluation for this trained-adapter run.",
+    )
+
     train = subparsers.add_parser("train", help="Run LoRA fine-tuning for supported backbones.")
     add_config_args(train)
     train.add_argument(
@@ -81,6 +114,19 @@ def _load_config_from_args(config_paths: list[str]):
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.command == "evaluate-trained-adapter":
+        metrics = evaluate_trained_adapter(
+            Path(args.training_root),
+            split=args.split,
+            output_root=args.output_root,
+            limit=args.limit,
+            run_name=args.run_name,
+            resume=not args.no_resume,
+        )
+        print(metrics)
+        return
+
     settings = _load_config_from_args(args.configs)
 
     if args.command == "validate-config":
