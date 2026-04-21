@@ -28,13 +28,15 @@ The project uses a **funnel design**:
 
 The current committed study surface is:
 
-- `30` real VLM screening runs
+- `24` real VLM screening runs
 - `6` OCR lexical baseline screening runs
 - `8` finalist validation runs
 - `12` Qwen LoRA training runs
 - `8` appendix/stress runs
 
-That is a total of **64 committed experiment runs/configurations**.
+That is a total of **58 committed experiment runs/configurations**.
+
+In addition, the repo now contains an **exploratory** MiniGPT-4 adapter plus one completed local pilot screening run. That exploratory path is documented below, but it is **not** part of the canonical benchmark, finalist promotion, or winner-selection logic for the current paper.
 
 The canonical interpretation of the project is:
 
@@ -69,7 +71,7 @@ An early version of the plan was broader. The current design keeps the project a
 
 That is why the project uses:
 
-- a manageable 5-backbone primary benchmark set
+- a manageable 4-backbone primary benchmark set
 - a staged screening-to-finalist funnel
 - one deep adaptation path instead of two shallow ones
 - explicit appendix runs instead of mixing every ablation into the main leaderboard
@@ -121,7 +123,7 @@ This helps keep screening stable enough to support finalist promotion.
 
 ## 5. Model pool
 
-The primary benchmark pool is intentionally limited to five real VLM families plus one OCR baseline:
+The **canonical reportable benchmark pool** is intentionally limited to four real VLM families plus one OCR baseline:
 
 ### Real VLM backbones
 
@@ -129,7 +131,6 @@ The primary benchmark pool is intentionally limited to five real VLM families pl
 2. `InternVL2.5-4B`
 3. `LLaVA-Phi-3-mini`
 4. `BLIP-2 OPT-2.7B`
-5. `MiniGPT-4 Vicuna-7B`
 
 ### Non-neural lexical baseline
 
@@ -141,7 +142,23 @@ The rationale is:
 - small enough to keep integration risk under control
 - strong enough to produce a credible winner-selection story
 
-The project currently uses **Qwen2.5-VL-3B** as the training backbone because it emerged as the practical winner in the evaluation funnel and is the backbone with the cleanest path to a serious LoRA study in this repo. `MiniGPT-4` is included as an evaluation backbone, but not as a training target in the current codebase.
+The project currently uses **Qwen2.5-VL-3B** as the training backbone because it emerged as the practical winner in the evaluation funnel and is the backbone with the cleanest path to a serious LoRA study in this repo.
+
+### Exploratory model kept outside the canonical benchmark
+
+The repo also contains an exploratory `MiniGPT-4 Vicuna-7B` adapter, but it is **not** included in the canonical benchmark or paper-facing winner-selection funnel.
+
+The reason is methodological rather than cosmetic:
+
+- MiniGPT-4 was added later as an exploratory extension, not as part of the original committed four-backbone matrix.
+- Its upstream stack is less cleanly aligned with the repo's main Hugging Face-first inference path than the four committed backbones.
+- After the local MPS inference bug was fixed, the completed `short_answer` internal-dev run still reached only `0.0055` accuracy on `2,000` examples, which is far outside the competitive range for this project.
+- Because the remaining five MiniGPT-4 prompt variants were intentionally **not** run after that result, MiniGPT-4 never completed the same full six-setting screening matrix used by the canonical benchmark backbones.
+
+So the sound conclusion is:
+
+- keep the adapter in the repo as exploratory work and future infrastructure
+- do **not** use MiniGPT-4 in finalist promotion, backbone winner selection, or main paper claims for the current project version
 
 ## 6. Experiment matrix
 
@@ -160,8 +177,10 @@ Prompt/settings matrix:
 
 This creates:
 
-- `30` real VLM screening runs = `5 backbones x 6 settings`
+- `24` real VLM screening runs = `4 backbones x 6 settings`
 - `6` OCR-baseline screening runs using the same settings
+
+The separate MiniGPT-4 pilot is outside these canonical counts and does not participate in finalist promotion.
 
 Why this stage exists:
 
@@ -260,9 +279,11 @@ The current project satisfies those requirements as follows.
 
 Satisfied by:
 
-- the `30` real VLM screening runs
+- the `24` canonical real VLM screening runs
 - the `6` OCR lexical baseline runs
 - the `8` finalist validation reruns
+
+The repo also contains one exploratory MiniGPT-4 pilot run, but that is intentionally treated as extra exploratory evidence rather than part of the required benchmark matrix.
 
 This is substantially more than a single baseline comparison.
 
@@ -320,7 +341,7 @@ This project is above the minimum assignment level in several ways.
 
 Even ignoring engineering/setup steps, the committed study contains:
 
-- `30` real screening runs
+- `24` real screening runs
 - `6` OCR baseline runs
 - `8` finalists
 - `12` training runs

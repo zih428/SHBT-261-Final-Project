@@ -75,7 +75,8 @@ To launch the full queue end to end:
 .venv/bin/python scripts/run_all_experiments.py
 ```
 
-The orchestration script performs prep, runs the `30` real-model screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
+The orchestration script performs prep, runs the configured `30` real-model screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
+For the current paper-facing interpretation, `24` of those screening runs form the canonical four-backbone benchmark and the additional `6` MiniGPT-4 runs are exploratory only.
 Before launching the offline queue, it now proactively warms every committed HF repo into the local cache. Subprocesses then run in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
 
 To see a one-shot overall progress summary without digging through `outputs/` manually:
@@ -118,10 +119,11 @@ Baseline config:
 - `ocr_injected_normalized`
 - `ocr_fused`
 
-With the `5` real VLM backbones, that is the planned `30` screening evaluations.
+The repo can execute a `30`-run real-model screening matrix if all five model configs are enabled. For the current reportable benchmark, only `24` runs (`4` backbones x `6` settings) are treated as canonical.
 
-`MiniGPT-4` is currently integrated as an evaluation backbone only. The committed training path remains Qwen-first.
-The MiniGPT-4 adapter now targets the official `Vision-CAIR/vicuna-7b` backbone and auto-downloads the official 7B checkpoint into `data/cache/minigpt4/` the first time you run it.
+`MiniGPT-4` is currently integrated as an exploratory evaluation backbone only. The committed training path remains Qwen-first, and MiniGPT-4 is not part of the canonical winner-selection funnel for this project version.
+The reason is that, after the local MPS inference bug was fixed, the completed `short_answer` internal-dev MiniGPT-4 run still achieved only `0.0055` accuracy on `2,000` examples, so the remaining five MiniGPT-4 prompt variants were intentionally not carried through the main benchmark.
+The adapter still targets the official `Vision-CAIR/vicuna-7b` backbone and auto-downloads the official 7B checkpoint into `data/cache/minigpt4/` the first time you run it.
 
 Example:
 
