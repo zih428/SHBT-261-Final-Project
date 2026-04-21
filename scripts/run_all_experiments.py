@@ -17,6 +17,16 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from textvqa_proj.config import load_settings
+from textvqa_proj.experiment_catalog import (
+    APPENDIX_CONFIGS,
+    BASELINE_MODEL_CONFIGS,
+    COMMON_CONFIGS,
+    FINALIST_DIR,
+    REAL_MODEL_CONFIGS,
+    SCREENING_CONFIGS,
+    TRAINING_CONFIGS,
+    TRAINING_MODEL_CONFIG,
+)
 from textvqa_proj.orchestration import (
     EvaluationResult,
     evaluation_completed,
@@ -29,30 +39,14 @@ from textvqa_proj.orchestration import (
 )
 from textvqa_proj.utils.io import atomic_write_json, ensure_dir
 
-COMMON_CONFIGS = [REPO_ROOT / "configs/runtime.toml", REPO_ROOT / "configs/data.toml"]
-REAL_MODEL_CONFIGS = [
-    REPO_ROOT / "configs/models/qwen25_vl_3b.toml",
-    REPO_ROOT / "configs/models/blip2_opt_2_7b.toml",
-    REPO_ROOT / "configs/models/llava_phi3_mini.toml",
-    REPO_ROOT / "configs/models/internvl2_5_4b.toml",
-]
-OCR_BASELINE_CONFIG = REPO_ROOT / "configs/models/ocr_lexical.toml"
-QWEN_MODEL_CONFIG = REPO_ROOT / "configs/models/qwen25_vl_3b.toml"
-SCREENING_ORDER = [
-    "plain",
-    "short_answer",
-    "ocr_copy_first",
-    "ocr_injected",
-    "ocr_injected_normalized",
-    "ocr_fused",
-]
-SCREENING_CONFIGS = [
-    REPO_ROOT / "configs/experiments/screening" / f"{name}.toml"
-    for name in SCREENING_ORDER
-]
-FINALIST_DIR = REPO_ROOT / "configs/experiments/finalists"
-TRAINING_CONFIGS = sorted((REPO_ROOT / "configs/experiments/training").glob("*.toml"))
-APPENDIX_CONFIGS = sorted((REPO_ROOT / "configs/experiments/appendix").glob("*.toml"))
+COMMON_CONFIGS = [REPO_ROOT / path for path in COMMON_CONFIGS]
+REAL_MODEL_CONFIGS = [REPO_ROOT / path for path in REAL_MODEL_CONFIGS]
+BASELINE_MODEL_CONFIGS = [REPO_ROOT / path for path in BASELINE_MODEL_CONFIGS]
+SCREENING_CONFIGS = [REPO_ROOT / path for path in SCREENING_CONFIGS]
+FINALIST_DIR = REPO_ROOT / FINALIST_DIR
+TRAINING_CONFIGS = [REPO_ROOT / path for path in TRAINING_CONFIGS]
+APPENDIX_CONFIGS = [REPO_ROOT / path for path in APPENDIX_CONFIGS]
+TRAINING_MODEL_CONFIG = REPO_ROOT / TRAINING_MODEL_CONFIG
 DEFAULT_LOG_ROOT = REPO_ROOT / "outputs/logs/run_all"
 
 
@@ -286,7 +280,7 @@ def run_evaluations(
 
 def run_training_queue(*, log_root: Path, dry_run: bool) -> None:
     for training_config in TRAINING_CONFIGS:
-        config_paths = [*COMMON_CONFIGS, QWEN_MODEL_CONFIG, training_config]
+        config_paths = [*COMMON_CONFIGS, TRAINING_MODEL_CONFIG, training_config]
         if training_completed(REPO_ROOT, config_paths):
             print(f"[skip] training {training_config.stem}")
             continue
@@ -339,7 +333,7 @@ def main() -> None:
     if not args.skip_baseline:
         run_evaluations(
             stage_name="screening-baseline",
-            model_configs=[OCR_BASELINE_CONFIG],
+            model_configs=BASELINE_MODEL_CONFIGS,
             experiment_configs=SCREENING_CONFIGS,
             log_root=log_root,
             dry_run=args.dry_run,

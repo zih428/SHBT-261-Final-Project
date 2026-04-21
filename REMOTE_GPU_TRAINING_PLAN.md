@@ -16,7 +16,8 @@ Current execution decision:
 
 Move only the `12` Qwen LoRA training runs to a rented NVIDIA GPU while preserving all already-finished local results:
 
-- `24` real screening runs: keep as canonical
+- `24` already-completed real screening runs: keep as canonical
+- `6` later-added MiniGPT-4 screening runs: keep local and separate from the remote training move
 - `6` OCR-baseline runs: keep as canonical
 - `8` finalist runs: keep as canonical
 - `8` appendix runs: keep as canonical

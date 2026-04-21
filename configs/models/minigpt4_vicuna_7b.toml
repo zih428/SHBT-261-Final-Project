@@ -1,0 +1,9 @@
+[model]
+adapter = "minigpt4"
+model_name = "ckpt/minigpt4-7B"
+processor_name = "lmsys/vicuna-7b-v1.5"
+revision = "main"
+torch_dtype = "float16"
+trust_remote_code = false
+local_files_only = false
+image_size = 224

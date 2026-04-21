@@ -74,6 +74,13 @@ class RunStore:
                 "use resume=true or choose a new run_name."
             )
         self._completed_ids = {record["sample_id"] for record in iter_jsonl(self.predictions_path)}
+        if self.progress_path.exists():
+            progress_payload = json.loads(self.progress_path.read_text(encoding="utf-8"))
+        else:
+            progress_payload = {}
+        self._started_at: str | None = progress_payload.get("started_at")
+        self._resumed_from_count: int | None = progress_payload.get("resumed_from_count")
+        self._total_count: int | None = progress_payload.get("total_count")
         self._write_settings_snapshot()
 
     def _write_settings_snapshot(self) -> None:
@@ -101,12 +108,21 @@ class RunStore:
         self._completed_ids.add(prediction.sample_id)
         self.write_progress(status="running")
 
+    def start(self, *, total_count: int) -> None:
+        self._started_at = datetime.now(tz=UTC).isoformat()
+        self._resumed_from_count = len(self._completed_ids)
+        self._total_count = total_count
+        self.write_progress(status="running")
+
     def write_progress(self, *, status: str, extra: dict[str, Any] | None = None) -> None:
         payload = {
             "run_name": self.settings.run_name,
             "status": status,
             "updated_at": datetime.now(tz=UTC).isoformat(),
             "processed_count": len(self._completed_ids),
+            "started_at": self._started_at,
+            "resumed_from_count": self._resumed_from_count,
+            "total_count": self._total_count,
         }
         if extra:
             payload.update(extra)

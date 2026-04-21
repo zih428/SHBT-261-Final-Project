@@ -152,6 +152,7 @@ class ExperimentRunner:
             len(pending_samples),
             len(completed_ids),
         )
+        self.run_store.start(total_count=len(samples))
 
         if pending_samples:
             self.adapter.load()

@@ -12,6 +12,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from textvqa_proj.config import load_settings
+from textvqa_proj.experiment_catalog import (
+    APPENDIX_CONFIGS,
+    BASELINE_MODEL_CONFIGS,
+    COMMON_CONFIGS,
+    REAL_MODEL_CONFIGS,
+    SCREENING_CONFIGS,
+    TRAINING_CONFIGS,
+    TRAINING_MODEL_CONFIG,
+)
 from textvqa_proj.orchestration import evaluation_run_root, training_run_root
 from textvqa_proj.training.trainer import (
     TrainingPaths,
@@ -19,17 +28,6 @@ from textvqa_proj.training.trainer import (
     latest_checkpoint,
 )
 
-COMMON_CONFIGS = [Path("configs/runtime.toml"), Path("configs/data.toml")]
-REAL_MODEL_CONFIGS = [
-    Path("configs/models/qwen25_vl_3b.toml"),
-    Path("configs/models/blip2_opt_2_7b.toml"),
-    Path("configs/models/llava_phi3_mini.toml"),
-    Path("configs/models/internvl2_5_4b.toml"),
-]
-BASELINE_MODEL_CONFIGS = [Path("configs/models/ocr_lexical.toml")]
-SCREENING_CONFIGS = sorted(Path("configs/experiments/screening").glob("*.toml"))
-TRAINING_CONFIGS = sorted(Path("configs/experiments/training").glob("*.toml"))
-APPENDIX_CONFIGS = sorted(Path("configs/experiments/appendix").glob("*.toml"))
 EASTERN_TZ = ZoneInfo("America/New_York")
 
 
@@ -50,6 +48,8 @@ class RunProgress:
     eta_at: str | None = None
     projected_start_at: str | None = None
     projected_end_at: str | None = None
+    total_count: int | None = None
+    resumed_from_count: int | None = None
     latest_log: dict[str, Any] | None = None
     latest_eval: dict[str, Any] | None = None
     error: str | None = None
@@ -159,6 +159,8 @@ def _training_display_name(run: dict[str, Any]) -> str:
 def _progress_cell(run: dict[str, Any]) -> str:
     if run.get("current_step") is not None and run.get("max_steps") is not None:
         return f"{run['current_step']}/{run['max_steps']}"
+    if run.get("processed_count") is not None and run.get("total_count") is not None:
+        return f"{run['processed_count']}/{run['total_count']}"
     if run.get("processed_count"):
         return f"{run['processed_count']}"
     return "-"
@@ -260,7 +262,7 @@ def _estimate_total_training_steps(
         return None
     return _estimate_training_max_steps(
         repo_root,
-        [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], config_path, *training_overlays],
+        [*COMMON_CONFIGS, TRAINING_MODEL_CONFIG, config_path, *training_overlays],
     )
 
 
@@ -418,14 +420,33 @@ def _evaluation_progress(repo_root: Path, config_paths: list[Path]) -> RunProgre
     progress = _read_json(run_root / "progress.json") or {}
     metrics = _read_json(run_root / "metrics.json") or {}
     label = f"{absolute_configs[-2].stem} x {absolute_configs[-1].stem}"
+    processed_count = int(progress.get("processed_count", 0))
+    total_count = progress.get("total_count")
+    started_at = progress.get("started_at")
+    resumed_from_count = progress.get("resumed_from_count")
+    eta_at = _format_eta(
+        started_at=started_at,
+        updated_at=progress.get("updated_at"),
+        current_step=processed_count,
+        max_steps=int(total_count) if total_count is not None else None,
+        resumed_from_step=(
+            int(resumed_from_count) if resumed_from_count is not None else None
+        ),
+    )
     return RunProgress(
         label=label,
         config_name=absolute_configs[-1].stem,
         status=str(progress.get("status", "pending")),
-        processed_count=int(progress.get("processed_count", 0)),
+        processed_count=processed_count,
         updated_at=progress.get("updated_at"),
         accuracy=float(metrics["accuracy"]) if "accuracy" in metrics else None,
         root=run_root,
+        started_at=started_at,
+        eta_at=eta_at,
+        total_count=int(total_count) if total_count is not None else None,
+        resumed_from_count=(
+            int(resumed_from_count) if resumed_from_count is not None else None
+        ),
     )
 
 
@@ -513,6 +534,31 @@ def _latest_screening_summary(repo_root: Path) -> dict[str, Any] | None:
         if summary:
             return summary
     return None
+
+
+def _latest_finalist_summary(repo_root: Path) -> dict[str, Any] | None:
+    log_root = repo_root / "outputs/logs/run_all"
+    if not log_root.exists():
+        return None
+    summaries = sorted(
+        log_root.glob("*/finalist_summary.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for summary_path in summaries:
+        summary = _read_json(summary_path)
+        if summary:
+            return summary
+    return None
+
+
+def _appendix_model_config(repo_root: Path) -> Path:
+    finalist_summary = _latest_finalist_summary(repo_root) or {}
+    winner = finalist_summary.get("winner") or {}
+    winner_model_config = winner.get("model_config")
+    if isinstance(winner_model_config, str):
+        return Path(winner_model_config)
+    return TRAINING_MODEL_CONFIG
 
 
 def _stage_status(counts: dict[str, int]) -> str:
@@ -636,7 +682,7 @@ def summarize_project_progress(
     training_runs = [
         _training_progress(
             repo_root,
-            [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], training_config, *resolved_training_overlays],
+            [*COMMON_CONFIGS, TRAINING_MODEL_CONFIG, training_config, *resolved_training_overlays],
             config_name=training_config.stem,
         )
         for training_config in TRAINING_CONFIGS
@@ -650,8 +696,9 @@ def summarize_project_progress(
         training_runs,
         training_overlays=resolved_training_overlays,
     )
+    appendix_model_config = _appendix_model_config(repo_root)
     appendix_runs = [
-        _evaluation_progress(repo_root, [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], appendix_config])
+        _evaluation_progress(repo_root, [*COMMON_CONFIGS, appendix_model_config, appendix_config])
         for appendix_config in APPENDIX_CONFIGS
     ]
     screening_counts = _summarize_statuses(screening_runs)
@@ -674,6 +721,8 @@ def summarize_project_progress(
     completed_screening = [run for run in screening_runs if run.status == "completed"]
     active_finalist = next((run for run in finalist_runs if run.status == "running"), None)
     active_training = next((run for run in training_runs if run.status == "running"), None)
+    active_baseline = next((run for run in baseline_runs if run.status == "running"), None)
+    active_appendix = next((run for run in appendix_runs if run.status == "running"), None)
     best_completed = max(
         completed_screening,
         key=lambda run: run.accuracy if run.accuracy is not None else float("-inf"),
@@ -702,6 +751,7 @@ def summarize_project_progress(
         },
         "screening_baseline": {
             "counts": baseline_counts,
+            "active_run": asdict(active_baseline) if active_baseline else None,
         },
         "finalists": {
             "counts": finalist_counts,
@@ -735,6 +785,7 @@ def summarize_project_progress(
         },
         "appendix": {
             "counts": appendix_counts,
+            "active_run": asdict(active_appendix) if active_appendix else None,
             "status": (
                 _stage_status(appendix_counts)
                 if any(run.status != "pending" for run in appendix_runs)
@@ -762,6 +813,12 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     training = summary["training"]
     appendix = summary["appendix"]
     prep = summary["prep"]
+    active_evaluations = [
+        ("Screening", screening.get("active_run")),
+        ("OCR Baseline", baseline.get("active_run")),
+        ("Finalists", finalists.get("active_run")),
+        ("Appendix", appendix.get("active_run")),
+    ]
     prep_rows = [
         ["Internal-dev external OCR", str(prep["internal_dev_external_ocr_rows"])],
         ["Validation external OCR", str(prep["validation_external_ocr_rows"])],
@@ -819,6 +876,23 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             appendix["status"],
         ],
     ]
+    active_evaluation_rows = [
+        [
+            stage_name,
+            _ellipsize(str(run.get("label", "-")), 44),
+            str(run.get("status", "-")),
+            _progress_cell(run),
+            _format_short_eastern_cell(run.get("updated_at"))
+            or str(run.get("updated_at") or "-"),
+            _format_eta_duration(
+                updated_at=run.get("updated_at"),
+                eta_at=run.get("eta_at"),
+            )
+            or "-",
+        ]
+        for stage_name, run in active_evaluations
+        if run
+    ]
 
     training_rows = [
         [
@@ -870,6 +944,18 @@ def render_progress_report(summary: dict[str, Any]) -> str:
                         ["Best run", _ellipsize(best["label"], 52)],
                         ["Accuracy", f"{best['accuracy']:.3f}"],
                     ],
+                ),
+            ]
+        )
+
+    if active_evaluation_rows:
+        lines.extend(
+            [
+                "",
+                "Active Evaluations",
+                _render_table(
+                    ["Stage", "Run", "Status", "Progress", "Updated (ET)", "ETA"],
+                    active_evaluation_rows,
                 ),
             ]
         )

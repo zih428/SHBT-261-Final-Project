@@ -5,6 +5,7 @@ from pathlib import Path
 from textvqa_proj.config import Settings
 from textvqa_proj.progress import (
     RunProgress,
+    _evaluation_progress,
     _project_training_schedule,
     _training_progress,
     render_progress_report,
@@ -30,7 +31,9 @@ def test_render_progress_report_mentions_stage_counts() -> None:
             "active_run": {
                 "label": "qwen25_vl_3b x ocr_fused",
                 "processed_count": 86,
+                "total_count": 2000,
                 "updated_at": "2026-04-17T01:05:50+00:00",
+                "eta_at": "2026-04-17T02:05:50+00:00",
             },
             "best_completed_run": {
                 "label": "qwen25_vl_3b x ocr_copy_first",
@@ -106,6 +109,9 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "qwen25_vl_3b x ocr_copy_first" in report
     assert "Accuracy" in report
     assert "0.708" in report
+    assert "Active Evaluations" in report
+    assert "86/2000" in report
+    assert "1h 0m" in report
     assert "Training Queue" in report
     assert "128/1024" in report
     assert "Updated (ET)" in report
@@ -284,6 +290,39 @@ def test_training_progress_prefers_latest_numeric_checkpoint(tmp_path, monkeypat
     assert progress.current_step == 1024
     assert progress.max_steps == 1024
     assert progress.checkpoint_step == 1024
+
+
+def test_evaluation_progress_reads_eta_fields(tmp_path, monkeypatch) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "progress.json").write_text(
+        """
+        {
+          "status": "running",
+          "processed_count": 50,
+          "total_count": 200,
+          "started_at": "2026-04-20T12:00:00+00:00",
+          "resumed_from_count": 10,
+          "updated_at": "2026-04-20T12:40:00+00:00"
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.progress.load_settings",
+        lambda config_paths: Settings(),
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.progress.evaluation_run_root",
+        lambda repo_root, settings: run_root,
+    )
+
+    progress = _evaluation_progress(tmp_path, [Path("dummy-model.toml"), Path("dummy-exp.toml")])
+
+    assert progress.processed_count == 50
+    assert progress.total_count == 200
+    assert progress.resumed_from_count == 10
+    assert progress.eta_at == "2026-04-20T15:10:00+00:00"
 
 
 def test_project_training_schedule_waits_for_active_runs_without_eta(

@@ -28,13 +28,13 @@ The project uses a **funnel design**:
 
 The current committed study surface is:
 
-- `24` real VLM screening runs
+- `30` real VLM screening runs
 - `6` OCR lexical baseline screening runs
 - `8` finalist validation runs
 - `12` Qwen LoRA training runs
 - `8` appendix/stress runs
 
-That is a total of **58 committed experiment runs/configurations**.
+That is a total of **64 committed experiment runs/configurations**.
 
 The canonical interpretation of the project is:
 
@@ -69,7 +69,7 @@ An early version of the plan was broader. The current design keeps the project a
 
 That is why the project uses:
 
-- a manageable 4-backbone primary benchmark set
+- a manageable 5-backbone primary benchmark set
 - a staged screening-to-finalist funnel
 - one deep adaptation path instead of two shallow ones
 - explicit appendix runs instead of mixing every ablation into the main leaderboard
@@ -121,7 +121,7 @@ This helps keep screening stable enough to support finalist promotion.
 
 ## 5. Model pool
 
-The primary benchmark pool is intentionally limited to four real VLM families plus one OCR baseline:
+The primary benchmark pool is intentionally limited to five real VLM families plus one OCR baseline:
 
 ### Real VLM backbones
 
@@ -129,10 +129,11 @@ The primary benchmark pool is intentionally limited to four real VLM families pl
 2. `InternVL2.5-4B`
 3. `LLaVA-Phi-3-mini`
 4. `BLIP-2 OPT-2.7B`
+5. `MiniGPT-4 Vicuna-7B`
 
 ### Non-neural lexical baseline
 
-5. `OCR lexical baseline`
+6. `OCR lexical baseline`
 
 The rationale is:
 
@@ -140,7 +141,7 @@ The rationale is:
 - small enough to keep integration risk under control
 - strong enough to produce a credible winner-selection story
 
-The project currently uses **Qwen2.5-VL-3B** as the training backbone because it emerged as the practical winner in the evaluation funnel and is the backbone with the cleanest path to a serious LoRA study in this repo.
+The project currently uses **Qwen2.5-VL-3B** as the training backbone because it emerged as the practical winner in the evaluation funnel and is the backbone with the cleanest path to a serious LoRA study in this repo. `MiniGPT-4` is included as an evaluation backbone, but not as a training target in the current codebase.
 
 ## 6. Experiment matrix
 
@@ -159,7 +160,7 @@ Prompt/settings matrix:
 
 This creates:
 
-- `24` real VLM screening runs = `4 backbones x 6 settings`
+- `30` real VLM screening runs = `5 backbones x 6 settings`
 - `6` OCR-baseline screening runs using the same settings
 
 Why this stage exists:
@@ -259,7 +260,7 @@ The current project satisfies those requirements as follows.
 
 Satisfied by:
 
-- the `24` real VLM screening runs
+- the `30` real VLM screening runs
 - the `6` OCR lexical baseline runs
 - the `8` finalist validation reruns
 
@@ -319,7 +320,7 @@ This project is above the minimum assignment level in several ways.
 
 Even ignoring engineering/setup steps, the committed study contains:
 
-- `24` real screening runs
+- `30` real screening runs
 - `6` OCR baseline runs
 - `8` finalists
 - `12` training runs

@@ -75,7 +75,7 @@ To launch the full queue end to end:
 .venv/bin/python scripts/run_all_experiments.py
 ```
 
-The orchestration script performs prep, runs the `24` screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
+The orchestration script performs prep, runs the `30` real-model screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
 Before launching the offline queue, it now proactively warms every committed HF repo into the local cache. Subprocesses then run in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
 
 To see a one-shot overall progress summary without digging through `outputs/` manually:
@@ -101,6 +101,10 @@ Real model configs:
 - `configs/models/blip2_opt_2_7b.toml`
 - `configs/models/llava_phi3_mini.toml`
 - `configs/models/internvl2_5_4b.toml`
+- `configs/models/minigpt4_vicuna_7b.toml`
+
+Baseline config:
+
 - `configs/models/ocr_lexical.toml`
 
 ### Screening
@@ -114,7 +118,9 @@ Real model configs:
 - `ocr_injected_normalized`
 - `ocr_fused`
 
-With the `4` real VLM backbones, that is the planned `24` screening evaluations.
+With the `5` real VLM backbones, that is the planned `30` screening evaluations.
+
+`MiniGPT-4` is currently integrated as an evaluation backbone only. The committed training path remains Qwen-first.
 
 Example:
 
