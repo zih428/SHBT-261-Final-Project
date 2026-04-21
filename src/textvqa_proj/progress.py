@@ -5,7 +5,7 @@ import math
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from textvqa_proj.training.trainer import (
 )
 
 EASTERN_TZ = ZoneInfo("America/New_York")
+TRAINING_STALE_AFTER = timedelta(hours=2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +74,10 @@ def _parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+
+def _current_utc() -> datetime:
+    return datetime.now(UTC)
 
 
 def _format_short_eastern(value: str | None) -> str | None:
@@ -379,6 +384,24 @@ def _pid_is_alive(pid: int | None) -> bool:
     return True
 
 
+def _normalize_training_status(
+    status: str,
+    *,
+    updated_at: str | None,
+    latest_log: dict[str, Any] | None,
+) -> str:
+    if status != "running":
+        return status
+    if latest_log and _pid_is_alive(latest_log.get("pid")):
+        return status
+    updated = _parse_iso(updated_at)
+    if updated is None:
+        return status
+    if (_current_utc() - updated) > TRAINING_STALE_AFTER:
+        return "failed"
+    return status
+
+
 def _format_eta(
     *,
     started_at: str | None,
@@ -477,6 +500,12 @@ def _training_progress(
     resumed_from_step = state.get("resumed_from_step")
     started_at = state.get("started_at")
     updated_at = state.get("updated_at")
+    latest_log = state.get("latest_log")
+    status = _normalize_training_status(
+        str(state.get("status", "pending")),
+        updated_at=updated_at,
+        latest_log=latest_log if isinstance(latest_log, dict) else None,
+    )
     eta_at = _format_eta(
         started_at=started_at,
         updated_at=updated_at,
@@ -487,7 +516,7 @@ def _training_progress(
     return RunProgress(
         label=label,
         config_name=config_name,
-        status=str(state.get("status", "pending")),
+        status=status,
         processed_count=int(state.get("train_rows", 0)),
         updated_at=updated_at,
         accuracy=None,
@@ -498,9 +527,16 @@ def _training_progress(
         resumed_from_step=int(resumed_from_step) if resumed_from_step is not None else None,
         started_at=started_at,
         eta_at=eta_at,
-        latest_log=state.get("latest_log"),
+        latest_log=latest_log if isinstance(latest_log, dict) else None,
         latest_eval=state.get("latest_eval"),
-        error=state.get("error"),
+        error=(
+            state.get("error")
+            or (
+                "trainer_state.json is stale and no live local training worker was detected."
+                if status == "failed" and str(state.get("status", "pending")) == "running"
+                else None
+            )
+        ),
     )
 
 

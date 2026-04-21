@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from textvqa_proj.config import Settings
@@ -290,6 +291,41 @@ def test_training_progress_prefers_latest_numeric_checkpoint(tmp_path, monkeypat
     assert progress.current_step == 1024
     assert progress.max_steps == 1024
     assert progress.checkpoint_step == 1024
+
+
+def test_training_progress_downgrades_stale_running_state(tmp_path, monkeypatch) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "trainer_state.json").write_text(
+        """
+        {
+          "status": "running",
+          "global_step": 512,
+          "max_steps": 1024,
+          "updated_at": "2026-04-20T19:15:45.625602+00:00"
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "textvqa_proj.progress.load_settings",
+        lambda config_paths: Settings(),
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.progress.training_run_root",
+        lambda repo_root, settings: run_root,
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.progress._current_utc",
+        lambda: datetime.fromisoformat("2026-04-21T20:58:22+00:00"),
+    )
+
+    progress = _training_progress(tmp_path, [Path("dummy.toml")], config_name="demo")
+
+    assert progress.status == "failed"
+    assert progress.error is not None
+    assert "stale" in progress.error
 
 
 def test_evaluation_progress_reads_eta_fields(tmp_path, monkeypatch) -> None:
