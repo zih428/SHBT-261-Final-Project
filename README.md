@@ -152,8 +152,8 @@ The heuristic OCR baseline uses the same experiment configs with `configs/models
 - `2` OCR-conditioning runs:
   OCR off vs OCR on
 
-The core matrix is machine-tuned to use a realistic pilot train size on this Mac first, then scale up in the dedicated scaling configs.
-The committed LoRA configs now evaluate every `1024` optimizer steps and save every `512` steps, which cuts monitoring overhead substantially on Apple Silicon without changing the train/eval splits, learning schedule, or final checkpoint semantics.
+The core matrix uses a realistic pilot train size first, then scales up in the dedicated scaling configs.
+The committed LoRA configs now evaluate every `1024` optimizer steps and save every `512` steps, which cuts monitoring overhead without changing the train/eval splits, learning schedule, or final checkpoint semantics.
 
 Dry-run example:
 
@@ -304,7 +304,7 @@ Each training run saves:
 - External OCR sidecar generation resumes by re-reading the existing output JSONL and skipping completed sample IDs.
 - Output directories are namespaced by model slug plus run name to avoid collisions across the experiment matrix.
 - `runtime.run_tag` is included in the output directory name, which makes it safe to relaunch the full matrix under a new tuned protocol without mixing old and new results.
-- The remote CUDA override uses a distinct `runtime.run_tag`, which makes it safe to keep local Apple Silicon pilot checkpoints and remote NVIDIA training outputs side by side.
+- The remote CUDA override uses a distinct `runtime.run_tag`, which makes it safe to keep remote NVIDIA training outputs isolated from other experiment outputs.
 - Existing run directories now reject settings mismatches instead of silently appending incompatible outputs.
 - External/fused OCR configs fail fast if the required OCR sidecar manifest is missing.
 - The batch runner writes screening and finalist promotion summaries to `outputs/logs/run_all/<timestamp>/` so the chosen finalists and winning evaluation backbone are recorded for later write-up.
@@ -314,9 +314,8 @@ Each training run saves:
 
 ## Notes
 
-- The main fine-tuning path remains intentionally Qwen-first because it is the most realistic LoRA target on this Apple Silicon machine.
+- The main fine-tuning path remains intentionally Qwen-first because it is the backbone with the cleanest and most mature LoRA path in this repo.
 - The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, and LLaVA run most reliably at evaluation batch size `1`, while InternVL benefits from `2`.
-- Qwen LoRA training on this Mac is now machine-tuned to keep gradient checkpointing on, disable unsupported pinned-memory loading on MPS, and use dataloader worker count `2`; a controlled benchmark on the live stack showed that `2` workers outperformed both `0` and `4` for the MPS training path.
 - The batch runner now wraps long subprocesses with `caffeinate` when available so the machine does not idle-sleep in the middle of long evaluation or training jobs.
 - LLaVA batching beyond `1` was re-checked on this machine against the real finalist prompt path and was not enabled, because it changed deterministic outputs relative to the single-sample baseline.
 - OCR-heavy prompt variants are capped at `32` OCR tokens in the committed configs to control prompt growth without changing the experiment families.

@@ -42,7 +42,6 @@ The canonical interpretation of the project is:
 
 - local Apple-Silicon runs remain the canonical completed **evaluation** results
 - the final **training** matrix is being rerun cleanly on rented CUDA hardware
-- the local MPS training attempt is treated as an infrastructure pilot, not as final paper evidence
 
 ## 2. Research questions
 
@@ -224,9 +223,7 @@ The remaining `4` runs are intentionally follow-ups, not part of the first wave.
 
 Current canonical training policy:
 
-- do **not** mix the partial local MPS training attempt with the final CUDA training record
 - rerun the full training matrix under a separate remote run namespace
-- keep the local MPS run only as infrastructure history
 
 ### Appendix
 
@@ -248,9 +245,7 @@ The evaluation stages were feasible locally on Apple Silicon.
 
 The training stage was different:
 
-- the Qwen-VL LoRA path on local MPS was operationally too slow
 - the final training matrix would have taken too long to finish cleanly on the Mac
-- the partial local training run had already become an infrastructure artifact rather than a good final-paper record
 
 So the scientifically clean choice was:
 

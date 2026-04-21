@@ -73,32 +73,13 @@ The remote move is scientifically sound **if we do it this way**:
 
 1. Keep all completed evaluation outputs exactly as they are.
 2. Do **not** rerun screening, finalists, or appendix on the rental GPU.
-3. Treat the existing local MPS training attempt as a **discarded infrastructure pilot**, not as part of the final training matrix.
-4. Rerun the full `12` training configs from scratch on the rental GPU under a **new training run tag**.
-5. Use the **same repo commit**, **same data manifests**, **same training TOMLs**, and only allow runtime-only overrides:
+3. Rerun the full `12` training configs from scratch on the rental GPU under a **new training run tag**.
+4. Use the **same repo commit**, **same data manifests**, **same training TOMLs**, and only allow runtime-only overrides:
    - device order
    - worker count
    - remote-only cache behavior
    - remote-only run tag
-6. Keep remote outputs in new run directories so they cannot mix with the partial local MPS run.
-
-## Important decision: do not continue the half-finished local MPS run on CUDA
-
-The current local run already has partial MPS progress and `checkpoint-512`.
-
-I do **not** recommend using that as the starting point for the final remote run set.
-
-Reason:
-
-- It would mix two hardware/runtime regimes inside one nominal experiment:
-  - Apple MPS
-  - NVIDIA CUDA
-- That is avoidable and unnecessary.
-- The clean paper version is to say:
-  - local MPS training was too slow to be practical
-  - final training matrix was rerun on a rented CUDA GPU from scratch
-
-That is much easier to defend in the write-up.
+5. Keep remote outputs in new run directories so they cannot mix with older or exploratory local artifacts.
 
 ## What to preserve locally
 
@@ -109,13 +90,6 @@ These local results remain the canonical completed results:
 - the progress summaries and metrics derived from those runs
 
 These should be **kept**, not replaced.
-
-The current local training artifacts should also be kept, but only as infrastructure history:
-
-- `outputs/training/...-mps-tuned-v1-train-speed-v2/`
-- especially the partial `checkpoint-512`
-
-We should not delete them, but we should also not treat them as part of the final reported training matrix.
 
 ## What needs to move to the rental GPU
 
@@ -165,7 +139,7 @@ Before the remote rerun begins:
 
 This keeps the remote training outputs separate from the existing local MPS attempts.
 
-### Phase 3: remote cache prewarm and pilot
+### Phase 3: remote cache prewarm and initial launch
 
 Before the multi-GPU launch, prewarm the Hugging Face cache for `Qwen/Qwen2.5-VL-3B-Instruct`.
 
@@ -175,13 +149,13 @@ Purpose of the prewarm:
 - make the first launcher phase start from local cache instead of public-Hub fetches
 - reduce the chance that startup failures happen before `trainer_state.json` exists
 
-Before launching the full matrix, run **one pilot training job** on the rental GPU.
+Before launching the full matrix, run **one initial training job** on the rental GPU.
 
-Recommended pilot:
+Recommended first job:
 
 - `configs/experiments/training/core_all_linear_r16_seed07.toml`
 
-Purpose of the pilot:
+Purpose of the initial job:
 
 - verify CUDA environment is healthy
 - confirm the model fits comfortably
@@ -189,7 +163,7 @@ Purpose of the pilot:
 - choose the best CUDA-side dataloader worker count
 - verify checkpoint creation and resume behavior
 
-This pilot is still scientifically fine because it is one of the planned `12` configs. If it looks healthy, the full matrix can proceed.
+This first job is still scientifically fine because it is one of the planned `12` configs. If it looks healthy, the full matrix can proceed.
 
 ### Phase 4: staged parallel rerun of the `12` training jobs
 
