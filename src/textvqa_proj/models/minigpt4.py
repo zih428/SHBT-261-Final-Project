@@ -234,8 +234,6 @@ class MiniGPT4Adapter(BaseModelAdapter):
         self._model = None
         self._vis_processor = None
         self._conv_template = None
-        self._chat_cls = None
-        self._stopping_criteria = None
 
     def _checkpoint_path(self) -> Path:
         model_name = self.settings.model.model_name
@@ -334,26 +332,15 @@ class MiniGPT4Adapter(BaseModelAdapter):
         self._model.eval()
         self._vis_processor = _MiniGPT4ImageProcessor(self.settings.model.image_size or 224)
         processor_name = (self.settings.model.processor_name or "").casefold()
-        self._chat_cls = conversation_module.Chat
         self._conv_template = (
             conversation_module.CONV_VISION_LLama2
             if "llama-2" in processor_name
             else conversation_module.CONV_VISION_Vicuna0
         )
-        stop_words_ids = [[835], [2277, 29937]]
-        from transformers import StoppingCriteriaList
-
-        self._stopping_criteria = StoppingCriteriaList(
-            [
-                conversation_module.StoppingCriteriaSub(
-                    stops=[torch.tensor(ids).to(self._device) for ids in stop_words_ids]
-                )
-            ]
-        )
-
         if self._device == "mps":
+            # MiniGPT-4 produces degenerate outputs on this Mac when kept in fp16 on MPS.
             with contextlib.suppress(Exception):
-                self._model = self._model.to(torch.float16)
+                self._model = self._model.to(torch.float32)
         elif self._device == "cpu":
             with contextlib.suppress(Exception):
                 self._model = self._model.to(torch.float32)
@@ -362,8 +349,6 @@ class MiniGPT4Adapter(BaseModelAdapter):
         self._model = None
         self._vis_processor = None
         self._conv_template = None
-        self._chat_cls = None
-        self._stopping_criteria = None
         release_torch_cache()
 
     def _build_user_text(self, prompt: PromptBundle) -> str:
@@ -380,7 +365,7 @@ class MiniGPT4Adapter(BaseModelAdapter):
         text = re.sub(r"\s+", " ", text)
         return text.strip(" \"'`")
 
-    def _generate_with_chat(
+    def _generate_with_model(
         self,
         sample: TextVQASample,
         prompt: PromptBundle,
@@ -390,8 +375,6 @@ class MiniGPT4Adapter(BaseModelAdapter):
         assert self._model is not None
         assert self._vis_processor is not None
         assert self._conv_template is not None
-        assert self._chat_cls is not None
-        assert self._stopping_criteria is not None
 
         image_path = Path(sample.image)
         image = load_image(image_path if image_path.exists() else sample.image)
@@ -399,26 +382,21 @@ class MiniGPT4Adapter(BaseModelAdapter):
         model_dtype = next(self._model.parameters()).dtype
         image_tensor = image_tensor.to(self._device, dtype=model_dtype)
 
-        chat = self._chat_cls(
-            self._model,
-            self._vis_processor,
-            device=self._device,
-            stopping_criteria=self._stopping_criteria,
-        )
         conv = self._conv_template.copy()
-        img_list: list[Any] = []
-        chat.upload_img(image_tensor, conv, img_list)
-        chat.encode_img(img_list)
-        chat.ask(self._build_user_text(prompt), conv)
-        answer, _ = chat.answer(
-            conv=conv,
-            img_list=img_list,
-            num_beams=1,
-            temperature=1.0,
-            max_new_tokens=generation.max_new_tokens,
-            max_length=2000,
-        )
-        return self._clean_answer(answer)
+        user_text = self._build_user_text(prompt)
+        conv.append_message(conv.roles[0], f"<Img><ImageHere></Img> {user_text}")
+        conv.append_message(conv.roles[1], None)
+        generation_kwargs: dict[str, Any] = {
+            "max_new_tokens": generation.max_new_tokens,
+            "num_beams": 1,
+            "do_sample": generation.do_sample,
+            "repetition_penalty": 1.0,
+        }
+        if generation.do_sample:
+            generation_kwargs["top_p"] = generation.top_p
+            generation_kwargs["temperature"] = generation.temperature
+        answer = self._model.generate(image_tensor, [conv.get_prompt()], **generation_kwargs)
+        return self._clean_answer(answer[0])
 
     def generate_batch(
         self,
@@ -427,7 +405,7 @@ class MiniGPT4Adapter(BaseModelAdapter):
         generation: GenerationSettings,
     ) -> list[str]:
         return [
-            self._generate_with_chat(sample, prompt, generation)
+            self._generate_with_model(sample, prompt, generation)
             for sample, prompt in zip(samples, prompts, strict=True)
         ]
 
