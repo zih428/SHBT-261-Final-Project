@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from textvqa_proj.progress import render_progress_report, render_training_report
+from pathlib import Path
+
+from textvqa_proj.config import Settings
+from textvqa_proj.progress import (
+    RunProgress,
+    _project_training_schedule,
+    _training_progress,
+    render_progress_report,
+    render_training_report,
+)
 
 
 def test_render_progress_report_mentions_stage_counts() -> None:
@@ -236,3 +245,123 @@ def test_render_training_report_shows_projected_queue_times() -> None:
     assert "now" in training_report
     assert "Apr 20  8:50 PM" in training_report
     assert "Apr 20 10:45 PM" in training_report
+
+
+def test_training_progress_prefers_latest_numeric_checkpoint(tmp_path, monkeypatch) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "trainer_state.json").write_text(
+        """
+        {
+          "status": "completed",
+          "global_step": 1024,
+          "max_steps": 1024,
+          "checkpoint_step": 512,
+          "updated_at": "2026-04-20T23:51:00+00:00"
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+    for step in (512, 1024):
+        checkpoint_root = run_root / f"checkpoint-{step}"
+        checkpoint_root.mkdir()
+        (checkpoint_root / "trainer_state.json").write_text(
+            f'{{"global_step": {step}, "max_steps": 1024}}',
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(
+        "textvqa_proj.progress.load_settings",
+        lambda config_paths: Settings(),
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.progress.training_run_root",
+        lambda repo_root, settings: run_root,
+    )
+
+    progress = _training_progress(tmp_path, [Path("dummy.toml")], config_name="demo")
+
+    assert progress.current_step == 1024
+    assert progress.max_steps == 1024
+    assert progress.checkpoint_step == 1024
+
+
+def test_project_training_schedule_waits_for_active_runs_without_eta(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "textvqa_proj.progress.TRAINING_CONFIGS",
+        [
+            Path("starting-a.toml"),
+            Path("starting-b.toml"),
+            Path("pending-a.toml"),
+            Path("pending-b.toml"),
+        ],
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.progress._estimate_training_max_steps",
+        lambda repo_root, config_paths: 1024,
+    )
+
+    runs = [
+        RunProgress(
+            label="done-a",
+            config_name="done-a",
+            status="completed",
+            processed_count=0,
+            updated_at="2026-04-20T02:50:40+00:00",
+            accuracy=None,
+            root=tmp_path,
+            current_step=1024,
+            max_steps=1024,
+            started_at="2026-04-20T00:00:00+00:00",
+        ),
+        RunProgress(
+            label="starting-a",
+            config_name="starting-a",
+            status="running",
+            processed_count=0,
+            updated_at="2026-04-20T03:00:00+00:00",
+            accuracy=None,
+            root=tmp_path,
+            current_step=0,
+            max_steps=1024,
+        ),
+        RunProgress(
+            label="starting-b",
+            config_name="starting-b",
+            status="starting",
+            processed_count=0,
+            updated_at="2026-04-20T03:05:00+00:00",
+            accuracy=None,
+            root=tmp_path,
+        ),
+        RunProgress(
+            label="pending-a",
+            config_name="pending-a",
+            status="pending",
+            processed_count=0,
+            updated_at=None,
+            accuracy=None,
+            root=tmp_path,
+        ),
+        RunProgress(
+            label="pending-b",
+            config_name="pending-b",
+            status="pending",
+            processed_count=0,
+            updated_at=None,
+            accuracy=None,
+            root=tmp_path,
+        ),
+    ]
+
+    projected_runs = _project_training_schedule(tmp_path, runs, training_overlays=[])
+    projected_by_name = {run.config_name: run for run in projected_runs}
+
+    assert projected_by_name["starting-a"].projected_start_at == "now"
+    assert projected_by_name["starting-a"].projected_end_at == "2026-04-20T05:50:40+00:00"
+    assert projected_by_name["starting-b"].projected_start_at == "now"
+    assert projected_by_name["starting-b"].projected_end_at == "2026-04-20T05:55:40+00:00"
+    assert projected_by_name["pending-a"].projected_start_at == "2026-04-20T05:50:40+00:00"
+    assert projected_by_name["pending-b"].projected_start_at == "2026-04-20T05:55:40+00:00"

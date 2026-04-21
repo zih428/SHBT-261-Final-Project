@@ -13,6 +13,11 @@ from zoneinfo import ZoneInfo
 
 from textvqa_proj.config import load_settings
 from textvqa_proj.orchestration import evaluation_run_root, training_run_root
+from textvqa_proj.training.trainer import (
+    TrainingPaths,
+    checkpoint_step_from_path,
+    latest_checkpoint,
+)
 
 COMMON_CONFIGS = [Path("configs/runtime.toml"), Path("configs/data.toml")]
 REAL_MODEL_CONFIGS = [
@@ -240,6 +245,57 @@ def _estimate_seconds_per_step(run: RunProgress) -> float | None:
     return elapsed / progressed_steps
 
 
+def _estimate_total_training_steps(
+    repo_root: Path,
+    *,
+    config_by_name: dict[str, Path],
+    training_overlays: list[Path],
+    config_name: str,
+    fallback_steps: int | None,
+) -> int | None:
+    if fallback_steps is not None:
+        return fallback_steps
+    config_path = config_by_name.get(config_name)
+    if config_path is None:
+        return None
+    return _estimate_training_max_steps(
+        repo_root,
+        [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], config_path, *training_overlays],
+    )
+
+
+def _projected_slot_free_at(
+    repo_root: Path,
+    *,
+    run: RunProgress,
+    avg_seconds_per_step: float,
+    config_by_name: dict[str, Path],
+    training_overlays: list[Path],
+) -> datetime | None:
+    eta = _parse_iso(run.eta_at)
+    if eta is not None:
+        return eta
+    updated = _parse_iso(run.updated_at)
+    if updated is None:
+        return None
+    total_steps = _estimate_total_training_steps(
+        repo_root,
+        config_by_name=config_by_name,
+        training_overlays=training_overlays,
+        config_name=run.config_name,
+        fallback_steps=run.max_steps,
+    )
+    if total_steps is None:
+        return updated
+    current_step = run.current_step
+    if current_step is None:
+        current_step = run.resumed_from_step or 0
+    remaining_steps = max(0, total_steps - current_step)
+    if remaining_steps <= 0:
+        return updated
+    return updated + timedelta(seconds=avg_seconds_per_step * remaining_steps)
+
+
 def _project_training_schedule(
     repo_root: Path,
     training_runs: list[RunProgress],
@@ -265,30 +321,33 @@ def _project_training_schedule(
         return training_runs
 
     slot_times: list[datetime] = []
+    projected_by_name: dict[str, tuple[str | None, str | None]] = {}
     for run in active_runs:
-        eta = _parse_iso(run.eta_at)
-        updated = _parse_iso(run.updated_at)
-        if eta is not None:
-            slot_times.append(eta)
-        elif updated is not None:
-            slot_times.append(updated)
+        slot_free_at = _projected_slot_free_at(
+            repo_root,
+            run=run,
+            avg_seconds_per_step=avg_seconds_per_step,
+            config_by_name=config_by_name,
+            training_overlays=training_overlays,
+        )
+        if slot_free_at is not None:
+            slot_times.append(slot_free_at)
+        projected_by_name[run.config_name] = (
+            "now",
+            slot_free_at.isoformat() if slot_free_at is not None else run.eta_at,
+        )
     if not slot_times:
         return training_runs
-
-    projected_by_name: dict[str, tuple[str | None, str | None]] = {}
-    for run in training_runs:
-        if run.status in {"running", "starting"}:
-            projected_by_name[run.config_name] = ("now", run.eta_at)
 
     for run in training_runs:
         if run.status != "pending":
             continue
-        config_path = config_by_name.get(run.config_name)
-        if config_path is None:
-            continue
-        estimated_steps = _estimate_training_max_steps(
+        estimated_steps = _estimate_total_training_steps(
             repo_root,
-            [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], config_path, *training_overlays],
+            config_by_name=config_by_name,
+            training_overlays=training_overlays,
+            config_name=run.config_name,
+            fallback_steps=run.max_steps,
         )
         if estimated_steps is None:
             continue
@@ -348,13 +407,8 @@ def _format_eta(
 
 
 def _checkpoint_step(run_root: Path) -> int | None:
-    checkpoints = sorted(run_root.glob("checkpoint-*"))
-    if not checkpoints:
-        return None
-    try:
-        return int(checkpoints[-1].name.split("-", maxsplit=1)[1])
-    except (IndexError, ValueError):
-        return None
+    checkpoint = latest_checkpoint(TrainingPaths(run_root))
+    return checkpoint_step_from_path(checkpoint) if checkpoint is not None else None
 
 
 def _evaluation_progress(repo_root: Path, config_paths: list[Path]) -> RunProgress:
@@ -385,10 +439,10 @@ def _training_progress(
     settings = load_settings(absolute_configs)
     run_root = training_run_root(repo_root, settings)
     state = _read_json(run_root / "trainer_state.json") or {}
+    latest_checkpoint_dir = latest_checkpoint(TrainingPaths(run_root))
     latest_checkpoint_state = None
-    latest_checkpoint = sorted(run_root.glob("checkpoint-*/trainer_state.json"))
-    if latest_checkpoint:
-        latest_checkpoint_state = _read_json(latest_checkpoint[-1]) or {}
+    if latest_checkpoint_dir is not None:
+        latest_checkpoint_state = _read_json(latest_checkpoint_dir / "trainer_state.json") or {}
     label = f"{settings.model_slug} x {settings.run_name}"
     current_step = state.get("global_step")
     if current_step is None and latest_checkpoint_state:
@@ -396,9 +450,9 @@ def _training_progress(
     max_steps = state.get("max_steps")
     if max_steps is None and latest_checkpoint_state:
         max_steps = latest_checkpoint_state.get("max_steps")
-    checkpoint_step = state.get("checkpoint_step")
-    if checkpoint_step is None:
-        checkpoint_step = _checkpoint_step(run_root)
+    checkpoint_candidates = [state.get("checkpoint_step"), _checkpoint_step(run_root)]
+    checkpoint_values = [value for value in checkpoint_candidates if value is not None]
+    checkpoint_step = max(checkpoint_values) if checkpoint_values else None
     resumed_from_step = state.get("resumed_from_step")
     started_at = state.get("started_at")
     updated_at = state.get("updated_at")

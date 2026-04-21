@@ -7,6 +7,7 @@ from textvqa_proj.training.runner import (
     _build_training_arguments_kwargs,
     _resolve_cpu_safe_training_runtime,
 )
+from textvqa_proj.training.trainer import TrainingPaths, latest_checkpoint
 
 
 def test_training_arguments_kwargs_supports_legacy_trainingarguments() -> None:
@@ -176,3 +177,11 @@ def test_build_trainer_progress_payload_tracks_runtime_state() -> None:
     assert payload["checkpoint_step"] == 128
     assert payload["latest_log"] == {"loss": 1.23, "step": 128}
     assert payload["latest_eval"] == {"eval_loss": 0.5}
+
+
+def test_latest_checkpoint_uses_numeric_step_order(tmp_path) -> None:
+    paths = TrainingPaths(tmp_path)
+    (tmp_path / "checkpoint-512").mkdir()
+    (tmp_path / "checkpoint-1024").mkdir()
+
+    assert latest_checkpoint(paths) == tmp_path / "checkpoint-1024"

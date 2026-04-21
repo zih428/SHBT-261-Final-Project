@@ -53,6 +53,19 @@ def write_training_settings(paths: TrainingPaths, payload: dict[str, object]) ->
         )
 
 
+def checkpoint_step_from_path(path: Path) -> int | None:
+    try:
+        return int(path.name.split("-", maxsplit=1)[1])
+    except (IndexError, ValueError):
+        return None
+
+
 def latest_checkpoint(paths: TrainingPaths) -> Path | None:
-    checkpoints = sorted(paths.checkpoints_dir.glob("checkpoint-*"))
-    return checkpoints[-1] if checkpoints else None
+    checkpoints = [
+        checkpoint
+        for checkpoint in paths.checkpoints_dir.glob("checkpoint-*")
+        if checkpoint_step_from_path(checkpoint) is not None
+    ]
+    if not checkpoints:
+        return None
+    return max(checkpoints, key=lambda checkpoint: checkpoint_step_from_path(checkpoint) or -1)
