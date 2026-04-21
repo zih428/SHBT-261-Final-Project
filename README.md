@@ -121,6 +121,7 @@ Baseline config:
 With the `5` real VLM backbones, that is the planned `30` screening evaluations.
 
 `MiniGPT-4` is currently integrated as an evaluation backbone only. The committed training path remains Qwen-first.
+The MiniGPT-4 adapter now targets the official `Vision-CAIR/vicuna-7b` backbone and auto-downloads the official 7B checkpoint into `data/cache/minigpt4/` the first time you run it.
 
 Example:
 

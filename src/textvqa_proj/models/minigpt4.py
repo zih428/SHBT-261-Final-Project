@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import os
+import re
 import subprocess
 import sys
 import types
@@ -20,6 +21,12 @@ from textvqa_proj.utils.perf import release_torch_cache
 
 MINIGPT4_GIT_URL = "https://github.com/Vision-CAIR/MiniGPT-4.git"
 MINIGPT4_COMMIT = "d94738a7626ec43eba6c2cddf3cd2043f1a9689a"
+MINIGPT4_KNOWN_CHECKPOINTS = {
+    "ckpt/minigpt4-7B": {
+        "file_id": "1RY9jV0dyqLX-o38LrumkKRh6Jtaop58R",
+        "filename": "pretrained-minigpt4-vicuna-7b-official.pth",
+    }
+}
 MINIGPT4_CHECKPOINT_FILENAMES = (
     "pretrained-minigpt4-vicuna-7b.pth",
     "prerained_minigpt4_7b.pth",
@@ -227,9 +234,30 @@ class MiniGPT4Adapter(BaseModelAdapter):
         self._model = None
         self._vis_processor = None
         self._conv_template = None
+        self._chat_cls = None
+        self._stopping_criteria = None
 
     def _checkpoint_path(self) -> Path:
         model_name = self.settings.model.model_name
+        known = MINIGPT4_KNOWN_CHECKPOINTS.get(model_name)
+        if known is not None:
+            target = Path(self.settings.runtime.cache_root) / "minigpt4" / known["filename"]
+            if target.exists():
+                return target
+            try:
+                import gdown
+            except ImportError as exc:
+                raise RuntimeError(
+                    "gdown is required to fetch the official MiniGPT-4 checkpoint. "
+                    "Install the models extras or add gdown to the environment."
+                ) from exc
+            target.parent.mkdir(parents=True, exist_ok=True)
+            downloaded = gdown.download(id=known["file_id"], output=str(target), quiet=False)
+            if not downloaded:
+                raise RuntimeError(
+                    f"Failed to download the official MiniGPT-4 checkpoint to {target}."
+                )
+            return target
         candidate = Path(model_name)
         if candidate.exists():
             return candidate
@@ -306,31 +334,91 @@ class MiniGPT4Adapter(BaseModelAdapter):
         self._model.eval()
         self._vis_processor = _MiniGPT4ImageProcessor(self.settings.model.image_size or 224)
         processor_name = (self.settings.model.processor_name or "").casefold()
+        self._chat_cls = conversation_module.Chat
         self._conv_template = (
             conversation_module.CONV_VISION_LLama2
             if "llama-2" in processor_name
             else conversation_module.CONV_VISION_Vicuna0
         )
+        stop_words_ids = [[835], [2277, 29937]]
+        from transformers import StoppingCriteriaList
+
+        self._stopping_criteria = StoppingCriteriaList(
+            [
+                conversation_module.StoppingCriteriaSub(
+                    stops=[torch.tensor(ids).to(self._device) for ids in stop_words_ids]
+                )
+            ]
+        )
 
         if self._device == "mps":
             with contextlib.suppress(Exception):
                 self._model = self._model.to(torch.float16)
+        elif self._device == "cpu":
+            with contextlib.suppress(Exception):
+                self._model = self._model.to(torch.float32)
 
     def unload(self) -> None:
         self._model = None
         self._vis_processor = None
         self._conv_template = None
+        self._chat_cls = None
+        self._stopping_criteria = None
         release_torch_cache()
 
-    def _build_minigpt_prompt(self, prompt: PromptBundle) -> str:
-        assert self._conv_template is not None
-        conv = self._conv_template.copy()
-        user_text = "\n".join(
+    def _build_user_text(self, prompt: PromptBundle) -> str:
+        return "\n".join(
             part for part in [prompt.system_message, prompt.user_message] if part
         ).strip()
-        conv.append_message(conv.roles[0], f"<Img><ImageHere></Img> {user_text}".strip())
-        conv.append_message(conv.roles[1], None)
-        return conv.get_prompt()
+
+    def _clean_answer(self, answer: str) -> str:
+        text = answer.replace("\u200b", "").replace("\\_", " ").strip()
+        text = text.split("###", 1)[0].strip()
+        text = text.split("\n##", 1)[0].strip()
+        text = text.split("\n\n(", 1)[0].strip()
+        text = text.splitlines()[0].strip() if text else text
+        text = re.sub(r"\s+", " ", text)
+        return text.strip(" \"'`")
+
+    def _generate_with_chat(
+        self,
+        sample: TextVQASample,
+        prompt: PromptBundle,
+        generation: GenerationSettings,
+    ) -> str:
+        self.load()
+        assert self._model is not None
+        assert self._vis_processor is not None
+        assert self._conv_template is not None
+        assert self._chat_cls is not None
+        assert self._stopping_criteria is not None
+
+        image_path = Path(sample.image)
+        image = load_image(image_path if image_path.exists() else sample.image)
+        image_tensor = self._vis_processor(image).unsqueeze(0)
+        model_dtype = next(self._model.parameters()).dtype
+        image_tensor = image_tensor.to(self._device, dtype=model_dtype)
+
+        chat = self._chat_cls(
+            self._model,
+            self._vis_processor,
+            device=self._device,
+            stopping_criteria=self._stopping_criteria,
+        )
+        conv = self._conv_template.copy()
+        img_list: list[Any] = []
+        chat.upload_img(image_tensor, conv, img_list)
+        chat.encode_img(img_list)
+        chat.ask(self._build_user_text(prompt), conv)
+        answer, _ = chat.answer(
+            conv=conv,
+            img_list=img_list,
+            num_beams=1,
+            temperature=1.0,
+            max_new_tokens=generation.max_new_tokens,
+            max_length=2000,
+        )
+        return self._clean_answer(answer)
 
     def generate_batch(
         self,
@@ -338,34 +426,10 @@ class MiniGPT4Adapter(BaseModelAdapter):
         prompts: list[PromptBundle],
         generation: GenerationSettings,
     ) -> list[str]:
-        self.load()
-        assert self._model is not None
-        assert self._vis_processor is not None
-
-        try:
-            import torch
-        except ImportError as exc:
-            raise RuntimeError("torch is required for the MiniGPT-4 adapter") from exc
-
-        images = []
-        for sample in samples:
-            image_path = Path(sample.image)
-            image = load_image(image_path if image_path.exists() else sample.image)
-            images.append(self._vis_processor(image))
-        model_dtype = next(self._model.parameters()).dtype
-        image_batch = torch.stack(images).to(self._device, dtype=model_dtype)
-        prompt_texts = [self._build_minigpt_prompt(prompt) for prompt in prompts]
-        with torch.inference_mode():
-            outputs = self._model.generate(
-                images=image_batch,
-                texts=prompt_texts,
-                num_beams=1,
-                max_new_tokens=generation.max_new_tokens,
-                top_p=generation.top_p,
-                temperature=generation.temperature,
-                do_sample=generation.do_sample,
-            )
-        return [str(output).strip() for output in outputs]
+        return [
+            self._generate_with_chat(sample, prompt, generation)
+            for sample, prompt in zip(samples, prompts, strict=True)
+        ]
 
     def generate_one(
         self,

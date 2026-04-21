@@ -27,6 +27,7 @@ models = [
   "datasets>=3.5.0",
   "einops>=0.8.1",
   "evaluate>=0.4.3",
+  "gdown>=6.0.0",
   "huggingface-hub>=0.32.0",
   "iopath>=0.1.10",
   "omegaconf>=2.3.0",
