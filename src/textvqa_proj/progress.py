@@ -716,24 +716,27 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     stage_rows = [
         [
             "Screening",
+            "real VLMs",
             str(screening["counts"]["completed"]),
             str(screening["counts"]["running"]),
             str(screening["counts"]["pending"]),
             str(screening["counts"].get("failed", 0)),
             str(screening["counts"]["total"]),
-            "real VLMs",
+            _stage_status(screening["counts"]),
         ],
         [
             "OCR Baselines",
+            "heuristic OCR",
             str(baseline["counts"]["completed"]),
             str(baseline["counts"]["running"]),
             str(baseline["counts"]["pending"]),
             str(baseline["counts"].get("failed", 0)),
             str(baseline["counts"]["total"]),
-            "heuristic OCR",
+            _stage_status(baseline["counts"]),
         ],
         [
             "Finalists",
+            "full validation",
             str(finalist_counts["completed"]),
             str(finalist_counts["running"]),
             str(finalist_counts["pending"]),
@@ -743,6 +746,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         ],
         [
             "Training",
+            "Qwen LoRA",
             str(training["counts"]["completed"]),
             str(training["counts"]["running"]),
             str(training["counts"]["pending"]),
@@ -752,6 +756,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         ],
         [
             "Appendix",
+            "robustness",
             str(appendix["counts"]["completed"]),
             str(appendix["counts"]["running"]),
             str(appendix["counts"]["pending"]),
@@ -792,9 +797,9 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         "Prep",
         _render_table(["Item", "Rows"], prep_rows),
         "",
-        "Stages",
+        "Stage Summary",
         _render_table(
-            ["Stage", "Done", "Run", "Pend", "Fail", "Total", "Status"],
+            ["Stage", "Kind", "Done", "Run", "Pend", "Fail", "Total", "State"],
             stage_rows,
         ),
     ]
@@ -804,7 +809,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "Screening Highlight",
+                "Best Screening Run",
                 _render_table(
                     ["Metric", "Value"],
                     [
@@ -819,7 +824,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "Training Runs",
+                "Training Queue",
                 _render_table(
                     [
                         "Run",

@@ -89,14 +89,15 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     report = render_progress_report(summary)
 
     assert "TextVQA Progress" in report
-    assert "Stages" in report
+    assert "Stage Summary" in report
     assert "Screening" in report
     assert "OCR Baselines" in report
-    assert "Screening Highlight" in report
+    assert "real VLMs" in report
+    assert "Best Screening Run" in report
     assert "qwen25_vl_3b x ocr_copy_first" in report
     assert "Accuracy" in report
     assert "0.708" in report
-    assert "Training Runs" in report
+    assert "Training Queue" in report
     assert "128/1024" in report
     assert "Updated (ET)" in report
     assert "Projected Start (ET)" in report
