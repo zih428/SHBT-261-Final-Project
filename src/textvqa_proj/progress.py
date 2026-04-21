@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
@@ -42,6 +43,8 @@ class RunProgress:
     resumed_from_step: int | None = None
     started_at: str | None = None
     eta_at: str | None = None
+    projected_start_at: str | None = None
+    projected_end_at: str | None = None
     latest_log: dict[str, Any] | None = None
     latest_eval: dict[str, Any] | None = None
     error: str | None = None
@@ -78,6 +81,19 @@ def _format_short_eastern(value: str | None) -> str | None:
     minute = eastern.minute
     meridiem = "AM" if eastern.hour < 12 else "PM"
     return f"{month} {day} {hour}:{minute:02d} {meridiem} ET"
+
+
+def _format_short_eastern_cell(value: str | None) -> str | None:
+    parsed = _parse_iso(value)
+    if parsed is None:
+        return value
+    eastern = parsed.astimezone(EASTERN_TZ)
+    month = eastern.strftime("%b")
+    day = eastern.day
+    hour = eastern.hour % 12 or 12
+    minute = eastern.minute
+    meridiem = "AM" if eastern.hour < 12 else "PM"
+    return f"{month} {day:>2} {hour:>2}:{minute:02d} {meridiem}"
 
 
 def _format_eta_duration(*, updated_at: str | None, eta_at: str | None) -> str | None:
@@ -146,6 +162,150 @@ def _progress_cell(run: dict[str, Any]) -> str:
 def _checkpoint_cell(run: dict[str, Any]) -> str:
     checkpoint = run.get("checkpoint_step")
     return str(checkpoint) if checkpoint is not None else "-"
+
+
+def _resolve_training_manifest(settings: Any, split: str) -> Path | None:
+    normalized = split.replace("-", "_")
+    if normalized == "train" and settings.data.train_manifest_path:
+        return Path(settings.data.train_manifest_path)
+    if normalized == "internal_dev" and settings.data.internal_dev_manifest_path:
+        return Path(settings.data.internal_dev_manifest_path)
+    if (
+        normalized in {"train_remainder", "train_rest"}
+        and settings.data.train_remainder_manifest_path
+    ):
+        return Path(settings.data.train_remainder_manifest_path)
+    if normalized == "validation" and settings.data.validation_manifest_path:
+        return Path(settings.data.validation_manifest_path)
+    if normalized == "test" and settings.data.test_manifest_path:
+        return Path(settings.data.test_manifest_path)
+    if (
+        normalized == settings.training.train_split.replace("-", "_")
+        and settings.data.train_manifest_path
+    ):
+        return Path(settings.data.train_manifest_path)
+    if (
+        settings.training.eval_split
+        and normalized == settings.training.eval_split.replace("-", "_")
+        and settings.data.manifest_path
+    ):
+        return Path(settings.data.manifest_path)
+    if settings.data.manifest_path:
+        return Path(settings.data.manifest_path)
+    return None
+
+
+def _count_manifest_rows(path: Path) -> int:
+    with path.open(encoding="utf-8") as handle:
+        return sum(1 for _ in handle)
+
+
+def _estimate_training_max_steps(repo_root: Path, config_paths: list[Path]) -> int | None:
+    absolute_configs = [_resolve(repo_root, path) for path in config_paths]
+    settings = load_settings(absolute_configs)
+    manifest_path = _resolve_training_manifest(settings, settings.training.train_split)
+    if manifest_path is None:
+        return None
+    manifest_path = _resolve(repo_root, manifest_path)
+    if not manifest_path.exists():
+        return None
+    train_rows = _count_manifest_rows(manifest_path)
+    if settings.training.train_limit is not None:
+        train_rows = min(train_rows, settings.training.train_limit)
+    if train_rows <= 0:
+        return None
+    per_device_batch = max(1, settings.training.per_device_train_batch_size)
+    dataloader_steps = math.ceil(train_rows / per_device_batch)
+    optimizer_steps_per_epoch = max(
+        1,
+        dataloader_steps // settings.training.gradient_accumulation_steps,
+    )
+    return max(1, math.ceil(settings.training.num_train_epochs * optimizer_steps_per_epoch))
+
+
+def _estimate_seconds_per_step(run: RunProgress) -> float | None:
+    started = _parse_iso(run.started_at)
+    updated = _parse_iso(run.updated_at)
+    if started is None or updated is None:
+        return None
+    if run.current_step is None:
+        return None
+    baseline_step = run.resumed_from_step or 0
+    progressed_steps = run.current_step - baseline_step
+    if progressed_steps <= 0:
+        return None
+    elapsed = (updated - started).total_seconds()
+    if elapsed <= 0:
+        return None
+    return elapsed / progressed_steps
+
+
+def _project_training_schedule(
+    repo_root: Path,
+    training_runs: list[RunProgress],
+    *,
+    training_overlays: list[Path],
+) -> list[RunProgress]:
+    if not training_runs:
+        return training_runs
+
+    config_by_name = {path.stem: path for path in TRAINING_CONFIGS}
+    step_seconds_samples = [
+        seconds
+        for run in training_runs
+        for seconds in [_estimate_seconds_per_step(run)]
+        if seconds is not None
+    ]
+    if not step_seconds_samples:
+        return training_runs
+    avg_seconds_per_step = sum(step_seconds_samples) / len(step_seconds_samples)
+
+    active_runs = [run for run in training_runs if run.status in {"running", "starting"}]
+    if not active_runs:
+        return training_runs
+
+    slot_times: list[datetime] = []
+    for run in active_runs:
+        eta = _parse_iso(run.eta_at)
+        updated = _parse_iso(run.updated_at)
+        if eta is not None:
+            slot_times.append(eta)
+        elif updated is not None:
+            slot_times.append(updated)
+    if not slot_times:
+        return training_runs
+
+    projected_by_name: dict[str, tuple[str | None, str | None]] = {}
+    for run in training_runs:
+        if run.status in {"running", "starting"}:
+            projected_by_name[run.config_name] = ("now", run.eta_at)
+
+    for run in training_runs:
+        if run.status != "pending":
+            continue
+        config_path = config_by_name.get(run.config_name)
+        if config_path is None:
+            continue
+        estimated_steps = _estimate_training_max_steps(
+            repo_root,
+            [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], config_path, *training_overlays],
+        )
+        if estimated_steps is None:
+            continue
+        slot_index = min(range(len(slot_times)), key=lambda index: slot_times[index])
+        start_time = slot_times[slot_index]
+        end_time = start_time + timedelta(seconds=avg_seconds_per_step * estimated_steps)
+        projected_by_name[run.config_name] = (start_time.isoformat(), end_time.isoformat())
+        slot_times[slot_index] = end_time
+
+    return [
+        replace(
+            run,
+            projected_start_at=projected_by_name.get(run.config_name, (None, None))[0],
+            projected_end_at=projected_by_name.get(run.config_name, (None, None))[1],
+        )
+        for run in training_runs
+    ]
 
 
 def _pid_is_alive(pid: int | None) -> bool:
@@ -431,6 +591,11 @@ def summarize_project_progress(
         training_runs,
         _latest_training_matrix_status(repo_root),
     )
+    training_runs = _project_training_schedule(
+        repo_root,
+        training_runs,
+        training_overlays=resolved_training_overlays,
+    )
     appendix_runs = [
         _evaluation_progress(repo_root, [*COMMON_CONFIGS, REAL_MODEL_CONFIGS[0], appendix_config])
         for appendix_config in APPENDIX_CONFIGS
@@ -602,13 +767,21 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             str(run.get("status", "-")),
             _progress_cell(run),
             _checkpoint_cell(run),
-            _format_short_eastern(run.get("updated_at")) or str(run.get("updated_at") or "-"),
+            _format_short_eastern_cell(run.get("updated_at"))
+            or str(run.get("updated_at") or "-"),
             _format_eta_duration(
                 updated_at=run.get("updated_at"),
                 eta_at=run.get("eta_at"),
             )
             or "-",
-            _ellipsize(run.get("error"), 42),
+            (
+                "now"
+                if run.get("projected_start_at") == "now"
+                else _format_short_eastern_cell(run.get("projected_start_at"))
+                or str(run.get("projected_start_at") or "-")
+            ),
+            _format_short_eastern_cell(run.get("projected_end_at"))
+            or str(run.get("projected_end_at") or "-"),
         ]
         for run in (training.get("runs") or [])
     ]
@@ -648,7 +821,16 @@ def render_progress_report(summary: dict[str, Any]) -> str:
                 "",
                 "Training Runs",
                 _render_table(
-                    ["Run", "Status", "Progress", "Ckpt", "Updated (ET)", "ETA", "Note"],
+                    [
+                        "Run",
+                        "Status",
+                        "Progress",
+                        "Ckpt",
+                        "Updated (ET)",
+                        "ETA",
+                        "Projected Start (ET)",
+                        "Projected End (ET)",
+                    ],
                     training_rows,
                 ),
             ]
@@ -676,29 +858,27 @@ def render_training_report(summary: dict[str, Any]) -> str:
 
     all_rows = []
     for run in training.get("runs") or []:
-        note = run.get("error")
-        latest_log = run.get("latest_log")
-        if (
-            note is None
-            and run.get("status") == "starting"
-            and latest_log
-            and latest_log.get("gpu_id") is not None
-        ):
-            note = f"gpu {latest_log['gpu_id']}"
         all_rows.append(
             [
                 _ellipsize(_training_display_name(run), 28),
                 str(run.get("status", "-")),
                 _progress_cell(run),
                 _checkpoint_cell(run),
-                _format_short_eastern(run.get("updated_at"))
+                _format_short_eastern_cell(run.get("updated_at"))
                 or str(run.get("updated_at") or "-"),
                 _format_eta_duration(
                     updated_at=run.get("updated_at"),
                     eta_at=run.get("eta_at"),
                 )
                 or "-",
-                _ellipsize(note, 42),
+                (
+                    "now"
+                    if run.get("projected_start_at") == "now"
+                    else _format_short_eastern_cell(run.get("projected_start_at"))
+                    or str(run.get("projected_start_at") or "-")
+                ),
+                _format_short_eastern_cell(run.get("projected_end_at"))
+                or str(run.get("projected_end_at") or "-"),
             ]
         )
 
@@ -713,7 +893,16 @@ def render_training_report(summary: dict[str, Any]) -> str:
             "",
             "All Runs",
             _render_table(
-                ["Run", "Status", "Progress", "Ckpt", "Updated (ET)", "ETA", "Note"],
+                [
+                    "Run",
+                    "Status",
+                    "Progress",
+                    "Ckpt",
+                    "Updated (ET)",
+                    "ETA",
+                    "Projected Start (ET)",
+                    "Projected End (ET)",
+                ],
                 all_rows,
             ),
         ]

@@ -98,7 +98,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "0.708" in report
     assert "Training Runs" in report
     assert "128/1024" in report
-    assert "Apr 20 2:00 PM ET" in report
+    assert "Updated (ET)" in report
+    assert "Projected Start (ET)" in report
+    assert "Projected End (ET)" in report
+    assert "Apr 20  2:00 PM" in report
     assert "2h 0m" in report
     assert "2026-04-20T18:00:00+00:00" not in report
 
@@ -108,7 +111,9 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Summary" in training_report
     assert "All Runs" in training_report
     assert "core_all_linear_r16_seed07" in training_report
-    assert "Apr 20 2:00 PM ET" in training_report
+    assert "Projected Start (ET)" in training_report
+    assert "Projected End (ET)" in training_report
+    assert "Apr 20  2:00 PM" in training_report
     assert "2h 0m" in training_report
     assert "Screening" not in training_report
 
@@ -148,8 +153,7 @@ def test_render_training_report_treats_starting_workers_as_running_stage() -> No
     assert "Active Runs" not in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "starting" in training_report
-    assert "Apr 20 6:39 PM ET" in training_report
-    assert "gpu 0" in training_report
+    assert "Apr 20  6:39 PM" in training_report
 
 
 def test_render_training_report_lists_multiple_active_runs() -> None:
@@ -190,3 +194,44 @@ def test_render_training_report_lists_multiple_active_runs() -> None:
     assert "Active Runs" not in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "core_all_linear_r16_seed13" in training_report
+
+
+def test_render_training_report_shows_projected_queue_times() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 0,
+                "running": 2,
+                "pending": 10,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "running",
+            "runs": [
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                    "status": "running",
+                    "current_step": 650,
+                    "max_steps": 1024,
+                    "checkpoint_step": 512,
+                    "updated_at": "2026-04-21T00:08:00+00:00",
+                    "eta_at": "2026-04-21T00:50:00+00:00",
+                    "projected_start_at": "now",
+                    "projected_end_at": "2026-04-21T00:50:00+00:00",
+                },
+                {
+                    "label": "qwen25_vl_3b x all-linear-r32-seed07",
+                    "status": "pending",
+                    "projected_start_at": "2026-04-21T00:50:00+00:00",
+                    "projected_end_at": "2026-04-21T02:45:00+00:00",
+                },
+            ],
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "now" in training_report
+    assert "Apr 20  8:50 PM" in training_report
+    assert "Apr 20 10:45 PM" in training_report
