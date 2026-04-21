@@ -176,6 +176,37 @@ def _checkpoint_cell(run: dict[str, Any]) -> str:
     return str(checkpoint) if checkpoint is not None else "-"
 
 
+def _format_metric_value(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return str(value)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        return text or "-"
+    if math.isnan(numeric):
+        return "nan"
+    if math.isinf(numeric):
+        return "inf" if numeric > 0 else "-inf"
+    return f"{numeric:.4g}"
+
+
+def _latest_loss_cell(run: dict[str, Any]) -> str:
+    latest_log = run.get("latest_log")
+    if not isinstance(latest_log, dict):
+        return "-"
+    return _format_metric_value(latest_log.get("loss"))
+
+
+def _latest_grad_norm_cell(run: dict[str, Any]) -> str:
+    latest_log = run.get("latest_log")
+    if not isinstance(latest_log, dict):
+        return "-"
+    return _format_metric_value(latest_log.get("grad_norm"))
+
+
 def _resolve_training_manifest(settings: Any, split: str) -> Path | None:
     normalized = split.replace("-", "_")
     if normalized == "train" and settings.data.train_manifest_path:
@@ -936,6 +967,8 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             str(run.get("status", "-")),
             _progress_cell(run),
             _checkpoint_cell(run),
+            _latest_loss_cell(run),
+            _latest_grad_norm_cell(run),
             _format_short_eastern_cell(run.get("updated_at"))
             or str(run.get("updated_at") or "-"),
             _format_eta_duration(
@@ -1007,6 +1040,8 @@ def render_progress_report(summary: dict[str, Any]) -> str:
                         "Status",
                         "Progress",
                         "Ckpt",
+                        "Loss",
+                        "Grad",
                         "Updated (ET)",
                         "ETA",
                         "Projected Start (ET)",
@@ -1045,6 +1080,8 @@ def render_training_report(summary: dict[str, Any]) -> str:
                 str(run.get("status", "-")),
                 _progress_cell(run),
                 _checkpoint_cell(run),
+                _latest_loss_cell(run),
+                _latest_grad_norm_cell(run),
                 _format_short_eastern_cell(run.get("updated_at"))
                 or str(run.get("updated_at") or "-"),
                 _format_eta_duration(
@@ -1079,6 +1116,8 @@ def render_training_report(summary: dict[str, Any]) -> str:
                     "Status",
                     "Progress",
                     "Ckpt",
+                    "Loss",
+                    "Grad",
                     "Updated (ET)",
                     "ETA",
                     "Projected Start (ET)",

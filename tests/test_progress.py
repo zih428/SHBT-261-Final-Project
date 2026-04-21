@@ -77,6 +77,7 @@ def test_render_progress_report_mentions_stage_counts() -> None:
                     "current_step": 128,
                     "max_steps": 1024,
                     "checkpoint_step": 0,
+                    "latest_log": {"loss": 0.81234, "grad_norm": 5.6789},
                     "updated_at": "2026-04-20T18:00:00+00:00",
                     "eta_at": "2026-04-20T20:00:00+00:00",
                 },
@@ -115,6 +116,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "1h 0m" in report
     assert "Training Queue" in report
     assert "128/1024" in report
+    assert "Loss" in report
+    assert "Grad" in report
+    assert "0.8123" in report
+    assert "5.679" in report
     assert "Updated (ET)" in report
     assert "Projected Start (ET)" in report
     assert "Projected End (ET)" in report
@@ -128,6 +133,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Summary" in training_report
     assert "All Runs" in training_report
     assert "core_all_linear_r16_seed07" in training_report
+    assert "Loss" in training_report
+    assert "Grad" in training_report
+    assert "0.8123" in training_report
+    assert "5.679" in training_report
     assert "Projected Start (ET)" in training_report
     assert "Projected End (ET)" in training_report
     assert "Apr 20  2:00 PM" in training_report
@@ -252,6 +261,39 @@ def test_render_training_report_shows_projected_queue_times() -> None:
     assert "now" in training_report
     assert "Apr 20  8:50 PM" in training_report
     assert "Apr 20 10:45 PM" in training_report
+
+
+def test_render_training_report_surfaces_non_finite_metrics() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 0,
+                "running": 1,
+                "pending": 11,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "running",
+            "runs": [
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                    "status": "running",
+                    "current_step": 25,
+                    "max_steps": 1024,
+                    "latest_log": {"loss": 0, "grad_norm": float("nan")},
+                    "updated_at": "2026-04-21T21:10:00+00:00",
+                }
+            ],
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "Loss" in training_report
+    assert "Grad" in training_report
+    assert "0" in training_report
+    assert "nan" in training_report
 
 
 def test_training_progress_prefers_latest_numeric_checkpoint(tmp_path, monkeypatch) -> None:
