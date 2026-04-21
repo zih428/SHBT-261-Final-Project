@@ -596,49 +596,6 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         ],
     ]
 
-    active_rows: list[list[str]] = []
-    screening_active = screening.get("active_run")
-    if screening_active:
-        active_rows.append(
-            [
-                "Screening",
-                _ellipsize(screening_active["label"], 42),
-                f"{screening_active['processed_count']} rows",
-                _format_short_eastern(screening_active.get("updated_at"))
-                or str(screening_active.get("updated_at") or "-"),
-                "-",
-            ]
-        )
-    finalist_active = finalists.get("active_run")
-    if finalist_active:
-        active_rows.append(
-            [
-                "Finalists",
-                _ellipsize(finalist_active["label"], 42),
-                f"{finalist_active['processed_count']} rows",
-                _format_short_eastern(finalist_active.get("updated_at"))
-                or str(finalist_active.get("updated_at") or "-"),
-                "-",
-            ]
-        )
-    for run in training.get("runs") or []:
-        if run.get("status") not in {"running", "starting"}:
-            continue
-        active_rows.append(
-            [
-                "Training",
-                _ellipsize(_training_display_name(run), 28),
-                _progress_cell(run),
-                _format_short_eastern(run.get("updated_at"))
-                or str(run.get("updated_at") or "-"),
-                _format_eta_duration(
-                    updated_at=run.get("updated_at"),
-                    eta_at=run.get("eta_at"),
-                )
-                or "-",
-            ]
-        )
-
     training_rows = [
         [
             _ellipsize(_training_display_name(run), 28),
@@ -685,18 +642,6 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             ]
         )
 
-    if active_rows:
-        lines.extend(
-            [
-                "",
-                "Active Runs",
-                _render_table(
-                    ["Stage", "Run", "Progress", "Updated (ET)", "ETA"],
-                    active_rows,
-                ),
-            ]
-        )
-
     if training_rows:
         lines.extend(
             [
@@ -728,23 +673,6 @@ def render_training_report(summary: dict[str, Any]) -> str:
         str(counts["total"]),
         status,
     ]]
-
-    active_rows = [
-        [
-            _ellipsize(_training_display_name(run), 28),
-            str(run.get("status", "-")),
-            _progress_cell(run),
-            _checkpoint_cell(run),
-            _format_short_eastern(run.get("updated_at")) or str(run.get("updated_at") or "-"),
-            _format_eta_duration(
-                updated_at=run.get("updated_at"),
-                eta_at=run.get("eta_at"),
-            )
-            or "-",
-        ]
-        for run in (training.get("runs") or [])
-        if run.get("status") in {"running", "starting"}
-    ]
 
     all_rows = []
     for run in training.get("runs") or []:
@@ -780,18 +708,6 @@ def render_training_report(summary: dict[str, Any]) -> str:
         "Summary",
         _render_table(["Done", "Run", "Pend", "Fail", "Total", "Status"], summary_rows),
     ]
-    if active_rows:
-        lines.extend(
-            [
-                "",
-                "Active Runs",
-                _render_table(
-                    ["Run", "Status", "Progress", "Ckpt", "Updated (ET)", "ETA"],
-                    active_rows,
-                ),
-            ]
-        )
-
     lines.extend(
         [
             "",

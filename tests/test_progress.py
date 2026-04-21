@@ -92,10 +92,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Stages" in report
     assert "Screening" in report
     assert "OCR Baselines" in report
-    assert "qwen25_vl_3b x ocr_fused" in report
+    assert "Screening Highlight" in report
+    assert "qwen25_vl_3b x ocr_copy_first" in report
     assert "Accuracy" in report
     assert "0.708" in report
-    assert "Active Runs" in report
     assert "Training Runs" in report
     assert "128/1024" in report
     assert "Apr 20 2:00 PM ET" in report
@@ -106,7 +106,6 @@ def test_render_progress_report_mentions_stage_counts() -> None:
 
     assert "TextVQA Training Progress" in training_report
     assert "Summary" in training_report
-    assert "Active Runs" in training_report
     assert "All Runs" in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "Apr 20 2:00 PM ET" in training_report
@@ -146,6 +145,7 @@ def test_render_training_report_treats_starting_workers_as_running_stage() -> No
 
     assert "Summary" in training_report
     assert "blocked until finalist selection completes" not in training_report
+    assert "Active Runs" not in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "starting" in training_report
     assert "Apr 20 6:39 PM ET" in training_report
@@ -187,6 +187,6 @@ def test_render_training_report_lists_multiple_active_runs() -> None:
 
     training_report = render_training_report(summary)
 
-    assert "Active Runs" in training_report
+    assert "Active Runs" not in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "core_all_linear_r16_seed13" in training_report
