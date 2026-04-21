@@ -5,6 +5,8 @@ from textvqa_proj.training.runner import (
     _build_cpu_fallback_training_error,
     _build_trainer_progress_payload,
     _build_training_arguments_kwargs,
+    _mixed_precision_flags,
+    _resolve_cuda_safe_training_dtype,
     _resolve_cpu_safe_training_runtime,
 )
 from textvqa_proj.training.trainer import TrainingPaths, latest_checkpoint
@@ -46,10 +48,14 @@ def test_training_arguments_kwargs_supports_modern_trainingarguments() -> None:
         has_eval=False,
         dataloader_num_workers=4,
         device="mps",
+        torch_module=torch,
+        dtype=torch.float16,
         accepted_names={
             "output_dir",
             "eval_strategy",
             "use_cpu",
+            "bf16",
+            "fp16",
             "dataloader_pin_memory",
             "dataloader_persistent_workers",
         },
@@ -59,6 +65,8 @@ def test_training_arguments_kwargs_supports_modern_trainingarguments() -> None:
     assert "evaluation_strategy" not in kwargs
     assert "use_mps_device" not in kwargs
     assert kwargs["use_cpu"] is False
+    assert kwargs["bf16"] is False
+    assert kwargs["fp16"] is False
     assert kwargs["dataloader_pin_memory"] is False
     assert kwargs["dataloader_persistent_workers"] is True
 
@@ -72,10 +80,14 @@ def test_training_arguments_kwargs_forces_safe_cpu_dataloader_settings() -> None
         has_eval=True,
         dataloader_num_workers=4,
         device="cpu",
+        torch_module=torch,
+        dtype=torch.float32,
         accepted_names={
             "output_dir",
             "eval_strategy",
             "use_cpu",
+            "bf16",
+            "fp16",
             "dataloader_pin_memory",
             "dataloader_persistent_workers",
         },
@@ -83,6 +95,8 @@ def test_training_arguments_kwargs_forces_safe_cpu_dataloader_settings() -> None
 
     assert kwargs["dataloader_num_workers"] == 0
     assert kwargs["use_cpu"] is True
+    assert kwargs["bf16"] is False
+    assert kwargs["fp16"] is False
     assert kwargs["dataloader_pin_memory"] is False
     assert kwargs["dataloader_persistent_workers"] is False
 
@@ -109,6 +123,45 @@ def test_resolve_cpu_safe_training_runtime_leaves_accelerated_path_unchanged() -
 
     assert dtype is torch.float16
     assert gradient_checkpointing is True
+
+
+class _FakeCudaModule:
+    def __init__(self, *, bf16_supported: bool) -> None:
+        self._bf16_supported = bf16_supported
+
+    def is_bf16_supported(self) -> bool:
+        return self._bf16_supported
+
+
+class _FakeTorchWithCuda:
+    float16 = object()
+    bfloat16 = object()
+
+    def __init__(self, *, bf16_supported: bool) -> None:
+        self.cuda = _FakeCudaModule(bf16_supported=bf16_supported)
+
+
+def test_resolve_cuda_safe_training_dtype_prefers_bfloat16_when_supported() -> None:
+    fake_torch = _FakeTorchWithCuda(bf16_supported=True)
+
+    dtype = _resolve_cuda_safe_training_dtype(
+        torch_module=fake_torch,
+        device="cuda",
+        requested_dtype=fake_torch.float16,
+    )
+
+    assert dtype is fake_torch.bfloat16
+
+
+def test_mixed_precision_flags_enable_bf16_only_for_cuda_bfloat16() -> None:
+    use_bf16, use_fp16 = _mixed_precision_flags(
+        torch_module=torch,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+
+    assert use_bf16 is True
+    assert use_fp16 is False
 
 
 class _FakeMPSBackend:

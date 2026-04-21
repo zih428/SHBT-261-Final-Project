@@ -204,16 +204,8 @@ def _phase_extra_configs(
 def _prewarm_repo(repo_id: str) -> None:
     from huggingface_hub import snapshot_download
 
-    allow_patterns = [
-        "*.json",
-        "*.txt",
-        "*.model",
-        "*.tiktoken",
-        "*.safetensors",
-        "*.jinja",
-    ]
     print(f"[prewarm] {repo_id}", flush=True)
-    snapshot_download(repo_id=repo_id, allow_patterns=allow_patterns)
+    snapshot_download(repo_id=repo_id)
     print(f"[prewarm-done] {repo_id}", flush=True)
 
 

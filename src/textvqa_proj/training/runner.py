@@ -21,7 +21,7 @@ from textvqa_proj.training.trainer import (
     write_training_settings,
 )
 from textvqa_proj.utils.device import pick_device
-from textvqa_proj.utils.hf import local_files_only
+from textvqa_proj.utils.hf import local_files_only, resolve_pretrained_source
 from textvqa_proj.utils.io import ensure_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -240,6 +240,39 @@ def _resolve_cpu_safe_training_runtime(
     return dtype, effective_gradient_checkpointing
 
 
+def _resolve_cuda_safe_training_dtype(
+    *,
+    torch_module: Any,
+    device: str,
+    requested_dtype: object,
+) -> object:
+    if device != "cuda":
+        return requested_dtype
+    if requested_dtype is not getattr(torch_module, "float16", None):
+        return requested_dtype
+    cuda_module = getattr(torch_module, "cuda", None)
+    if cuda_module is None or not hasattr(cuda_module, "is_bf16_supported"):
+        return requested_dtype
+    if not cuda_module.is_bf16_supported():
+        return requested_dtype
+    return torch_module.bfloat16
+
+
+def _mixed_precision_flags(
+    *,
+    torch_module: Any,
+    device: str,
+    dtype: object,
+) -> tuple[bool, bool]:
+    if device != "cuda":
+        return False, False
+    if dtype is getattr(torch_module, "bfloat16", None):
+        return True, False
+    if dtype is getattr(torch_module, "float16", None):
+        return False, True
+    return False, False
+
+
 def _build_cpu_fallback_training_error(
     *,
     torch_module: Any,
@@ -348,6 +381,8 @@ def _build_training_arguments_kwargs(
     has_eval: bool,
     dataloader_num_workers: int,
     device: str,
+    torch_module: Any | None = None,
+    dtype: object | None = None,
     gradient_checkpointing: bool | None = None,
     accepted_names: set[str],
 ) -> dict[str, object]:
@@ -392,6 +427,16 @@ def _build_training_arguments_kwargs(
     # an explicit flag, so only set it when the local TrainingArguments supports it.
     if "use_mps_device" in accepted_names:
         kwargs["use_mps_device"] = device == "mps"
+    if torch_module is not None and dtype is not None:
+        use_bf16, use_fp16 = _mixed_precision_flags(
+            torch_module=torch_module,
+            device=device,
+            dtype=dtype,
+        )
+        if "bf16" in accepted_names:
+            kwargs["bf16"] = use_bf16
+        if "fp16" in accepted_names:
+            kwargs["fp16"] = use_fp16
     return kwargs
 
 
@@ -474,11 +519,31 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         processor_kwargs["min_pixels"] = settings.model.min_pixels
     if settings.model.max_pixels is not None:
         processor_kwargs["max_pixels"] = settings.model.max_pixels
-    processor = AutoProcessor.from_pretrained(
-        settings.model.processor_name or settings.model.model_name,
+    model_source = resolve_pretrained_source(
+        settings.model.model_name,
         revision=settings.model.revision,
-        local_files_only=local_files_only(settings),
-        **processor_kwargs,
+        local_only=local_files_only(settings),
+    )
+    processor_source_name = settings.model.processor_name or settings.model.model_name
+    processor_source = (
+        model_source
+        if processor_source_name == settings.model.model_name
+        else resolve_pretrained_source(
+            processor_source_name,
+            revision=settings.model.revision,
+            local_only=local_files_only(settings),
+        )
+    )
+    processor_load_kwargs: dict[str, object] = dict(processor_kwargs)
+    processor_source_path = Path(processor_source)
+    if processor_source_path.exists():
+        processor_load_kwargs["local_files_only"] = True
+    else:
+        processor_load_kwargs["revision"] = settings.model.revision
+        processor_load_kwargs["local_files_only"] = local_files_only(settings)
+    processor = AutoProcessor.from_pretrained(
+        processor_source,
+        **processor_load_kwargs,
     )
 
     requested_dtype = getattr(torch, settings.model.torch_dtype, torch.float16)
@@ -488,9 +553,19 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         requested_dtype=requested_dtype,
         gradient_checkpointing=settings.training.gradient_checkpointing,
     )
+    dtype = _resolve_cuda_safe_training_dtype(
+        torch_module=torch,
+        device=device,
+        requested_dtype=dtype,
+    )
     if device == "cpu" and dtype is not requested_dtype:
         LOGGER.warning(
             "CPU fallback detected; overriding torch_dtype from %s to float32.",
+            settings.model.torch_dtype,
+        )
+    if device == "cuda" and dtype is not requested_dtype:
+        LOGGER.info(
+            "CUDA bf16 is supported; overriding torch_dtype from %s to bfloat16.",
             settings.model.torch_dtype,
         )
     if (
@@ -501,12 +576,19 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
         LOGGER.warning(
             "CPU fallback detected; disabling gradient checkpointing to avoid severe slowdown."
         )
+    model_load_kwargs: dict[str, object] = {
+        "torch_dtype": dtype,
+        "trust_remote_code": settings.model.trust_remote_code,
+    }
+    model_source_path = Path(model_source)
+    if model_source_path.exists():
+        model_load_kwargs["local_files_only"] = True
+    else:
+        model_load_kwargs["revision"] = settings.model.revision
+        model_load_kwargs["local_files_only"] = local_files_only(settings)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        settings.model.model_name,
-        revision=settings.model.revision,
-        torch_dtype=dtype,
-        trust_remote_code=settings.model.trust_remote_code,
-        local_files_only=local_files_only(settings),
+        model_source,
+        **model_load_kwargs,
     )
     model.to(device)
     model.config.use_cache = False
@@ -530,6 +612,8 @@ def run_training(settings: Settings, *, dry_run: bool = False) -> dict[str, Any]
             has_eval=eval_dataset is not None,
             dataloader_num_workers=settings.runtime.num_workers,
             device=device,
+            torch_module=torch,
+            dtype=dtype,
             gradient_checkpointing=effective_gradient_checkpointing,
             accepted_names=accepted_training_argument_names,
         )

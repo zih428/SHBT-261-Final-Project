@@ -4,4 +4,8 @@ num_workers = 4
 run_tag = "cuda-runpod-v1"
 
 [model]
+torch_dtype = "bfloat16"
 local_files_only = false
+
+[training]
+run_tag = "train-speed-v3"

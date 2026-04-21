@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from textvqa_proj.training.followups import (
     FollowupSelection,
     build_followup_override_toml,
     core_family_key,
+    load_completed_core_records,
     select_followup_winner,
     write_followup_override,
 )
@@ -178,6 +180,71 @@ def test_phase_extra_configs_writes_generated_override(monkeypatch, tmp_path: Pa
         tmp_path / "generated_followups" / "winner_selection.json"
     ).read_text(encoding="utf-8")
     assert '"family_key": "all-linear-r16"' in selection_payload
+
+
+def test_load_completed_core_records_rejects_non_finite_eval_loss(tmp_path: Path) -> None:
+    repo_root = tmp_path
+    base_config = repo_root / "runtime.toml"
+    data_config = repo_root / "data.toml"
+    model_config = repo_root / "model.toml"
+    training_config = repo_root / "core_all_linear_r16_seed07.toml"
+    base_config.write_text("", encoding="utf-8")
+    data_config.write_text("", encoding="utf-8")
+    model_config.write_text(
+        "\n".join(
+            [
+                "[model]",
+                'adapter = "qwen2_5_vl"',
+                'model_name = "Qwen/Qwen2.5-VL-3B-Instruct"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    training_config.write_text(
+        "\n".join(
+            [
+                "[experiment]",
+                'name = "lora-core-matrix"',
+                'run_name = "all-linear-r16-seed07"',
+                "",
+                "[training]",
+                'run_tag = "train-speed-v2"',
+                "",
+                "[runtime]",
+                'run_tag = "cuda-runpod-v1"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    run_root = (
+        repo_root
+        / "outputs/training/lora-core-matrix"
+        / "qwen2-5-vl-3b-instruct-all-linear-r16-seed07-cuda-runpod-v1-train-speed-v2"
+    )
+    run_root.mkdir(parents=True)
+    (run_root / "trainer_state.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "latest_eval": {"eval_loss": float("nan")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        load_completed_core_records(
+            repo_root,
+            base_config_paths=[base_config, data_config],
+            model_config_path=model_config,
+            training_config_paths=[training_config],
+            extra_config_paths=[],
+        )
+    except ValueError as exc:
+        assert "non-finite eval_loss" in str(exc)
+        assert "core_all_linear_r16_seed07" in str(exc)
+    else:
+        raise AssertionError("Expected non-finite eval_loss to be rejected.")
 
 
 def test_continue_training_pipeline_builds_followup_launcher_command() -> None:

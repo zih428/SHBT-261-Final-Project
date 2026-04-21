@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +71,7 @@ def load_completed_core_records(
     records: list[CoreRunRecord] = []
     incomplete: list[str] = []
     missing_eval: list[str] = []
+    invalid_eval: list[str] = []
 
     for training_config_path in training_config_paths:
         config_paths = [
@@ -89,12 +91,16 @@ def load_completed_core_records(
         if eval_loss is None:
             missing_eval.append(training_config_path.stem)
             continue
+        eval_loss_value = float(eval_loss)
+        if not math.isfinite(eval_loss_value):
+            invalid_eval.append(training_config_path.stem)
+            continue
         records.append(
             CoreRunRecord(
                 config_path=training_config_path,
                 run_name=settings.run_name,
                 family_key=core_family_key(settings.run_name),
-                eval_loss=float(eval_loss),
+                eval_loss=eval_loss_value,
                 settings=settings,
             )
         )
@@ -108,6 +114,11 @@ def load_completed_core_records(
         raise ValueError(
             "Completed core runs are missing eval_loss. Affected runs: "
             + ", ".join(sorted(missing_eval))
+        )
+    if invalid_eval:
+        raise ValueError(
+            "Completed core runs reported non-finite eval_loss. Affected runs: "
+            + ", ".join(sorted(invalid_eval))
         )
     return records
 
