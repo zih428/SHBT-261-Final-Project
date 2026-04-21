@@ -2,6 +2,10 @@
 
 Date: 2026-04-20
 
+This document is only about the **remote CUDA move for training**.
+
+For the full project-level study design, rationale, and assignment mapping, see [CURRENT_EXPERIMENT_DESIGN.md](CURRENT_EXPERIMENT_DESIGN.md).
+
 Current execution decision:
 
 - vendor: **RunPod**
@@ -43,17 +47,6 @@ That is the cleanest combination of:
 - cost control
 - implementation simplicity
 - scientific defensibility
-
-## Why not Colab
-
-Colab is not the right primary platform for this project because:
-
-- it is a **hosted Jupyter Notebook service**
-- runtimes are still lifecycle-managed by Colab
-- it is optimized for interactive notebook use, not long-running shell-first experiment queues
-- even paid plans are still shaped around compute units and runtime limits unless you move to a dedicated VM path
-
-For this repo, Colab would add friction without giving us a better scientific setup.
 
 ## Why not Colab or Vast as the primary venue
 
@@ -240,65 +233,15 @@ That override should handle:
 
 This changes runtime behavior only. It does **not** change the scientific definition of the training experiments.
 
-## What you need to do vs what I can do
+## Current execution policy
 
-### You need to do
-
-These are the pieces I cannot fully do without your accounts/payment:
-
-1. Create the cloud account.
-2. Add a payment method.
-3. Complete any identity / quota / billing checks the vendor requires.
-4. Approve the spending decision on the GPU tier.
-5. If the vendor console requires manual acceptance of terms, complete that.
-
-You may also need to:
-
-6. Add an SSH public key to the cloud account if the vendor requires that through the web console.
-
-### I can do
-
-Once you have account access and a reachable instance, I can handle the technical side:
-
-1. Prepare the remote runtime override config(s).
-2. Prepare the exact sync commands for the repo and data.
-3. Set up the repo on the remote machine.
-4. Install the Python environment and CUDA-side dependencies.
-5. Warm the model cache before the first parallel launch.
-6. Run the pilot benchmark.
-7. Tune the remote worker count if a short benchmark says it helps.
-8. Launch the `12` training jobs.
-9. Monitor progress and recover from interruptions.
-10. Sync outputs back to local.
-11. Integrate the remote training results into the final reporting pipeline.
-
-## Recommended vendor choice summary
-
-### Chosen venue
-
-**RunPod Secure Cloud**
-
-This is now the right venue for this repo because:
-
-- the pod is already provisioned
-- the repo is script-first rather than notebook-first
-- the selected hardware is `2x H100 80 GB`, which is enough to run two independent training jobs in parallel
-- the scientific plan remains clean as long as we keep the remote training outputs in their own CUDA run namespace
-
-### Do not use as the primary final-matrix venue
-
-- **Google Colab**: too notebook-shaped and runtime-managed for this repo
-- **Vast.ai**: too marketplace-shaped for the cleanest final training record
-
-## Concrete next step
-
-The recommended next action is:
+The current remote execution policy is:
 
 1. Keep the existing **RunPod** pod on-demand.
 2. Use the committed remote override config and staged launcher:
    - `core-matrix` first
-   - then the continuation helper or a second launcher for `ocr-ablation` + `data-scaling`
+   - then the continuation helper or follow-up phases for `ocr-ablation` + `data-scaling`
    - let the repo generate the winner override instead of editing the `best-assumed` TOMLs by hand
 3. Stop the pod whenever no active phase is running.
 
-At that point, the remote training run can proceed as the canonical final training stage.
+That keeps the remote training stage clean, resumable, and separate from the already-finished local evaluation record.

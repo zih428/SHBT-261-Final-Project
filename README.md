@@ -2,6 +2,12 @@
 
 Resumable, machine-tuned experimentation code for the SHBT 261 TextVQA final project.
 
+## Project docs
+
+- [CURRENT_EXPERIMENT_DESIGN.md](CURRENT_EXPERIMENT_DESIGN.md): canonical description of the current experiment design, rationale, requirement mapping, and "above and beyond" scope
+- [textvqa_revised_experiment_plan.md](textvqa_revised_experiment_plan.md): earlier planning doc that explains the original staged funnel and why the project was scoped this way
+- [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md): focused note on why only the training stage moved to remote CUDA and how that boundary stays scientifically clean
+
 ## What is here
 
 - Typed Python package under `src/textvqa_proj`
