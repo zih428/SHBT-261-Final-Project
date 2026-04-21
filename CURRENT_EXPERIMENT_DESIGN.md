@@ -43,6 +43,23 @@ The canonical interpretation of the project is:
 - local Apple-Silicon runs remain the canonical completed **evaluation** results
 - the final **training** matrix is being rerun cleanly on rented CUDA hardware
 
+## 1A. Local machine context
+
+The canonical local evaluation machine for this project is:
+
+- `MacBook Pro` (`Mac17,6`)
+- `Apple M5 Max`
+- `18` CPU cores
+- `40` GPU cores
+- `64 GB` unified memory
+- `macOS 26.4.1`
+- `Metal 4`
+
+These hardware/runtime details matter because they explain two design choices that show up throughout the repo:
+
+- local zero-shot evaluation and OCR-heavy prompt studies were feasible on this machine, especially with careful batching and resumable execution
+- the final LoRA training matrix was moved to remote CUDA hardware because the paper-quality training stage needed a faster and more scalable runtime than a single local MPS machine
+
 ## 2. Research questions
 
 The study is organized around one main question and three supporting questions.
@@ -241,7 +258,7 @@ These are not the centerpiece of the paper. They exist to strengthen the analysi
 
 ## 7. Why the training stage moved to remote CUDA
 
-The evaluation stages were feasible locally on Apple Silicon.
+The evaluation stages were feasible locally on the project MacBook Pro (`Apple M5 Max`, `40` GPU cores, `64 GB` unified memory, `macOS 26.4.1`, `Metal 4`).
 
 The training stage was different:
 

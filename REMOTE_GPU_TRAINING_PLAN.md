@@ -12,12 +12,21 @@ Current execution decision:
 - GPU shape: **2x NVIDIA H100 80 GB**
 - use mode: **on-demand / non-interruptible**
 
+Local machine being complemented by the remote move:
+
+- `MacBook Pro` (`Mac17,6`)
+- `Apple M5 Max`
+- `18` CPU cores
+- `40` GPU cores
+- `64 GB` unified memory
+- `macOS 26.4.1`
+
 ## Goal
 
 Move only the `12` Qwen LoRA training runs to a rented NVIDIA GPU while preserving all already-finished local results:
 
 - `24` already-completed real screening runs: keep as canonical
-- `6` later-added MiniGPT-4 screening runs: keep local and separate from the remote training move
+- `1` exploratory MiniGPT-4 pilot run: keep local and separate from the remote training move
 - `6` OCR-baseline runs: keep as canonical
 - `8` finalist runs: keep as canonical
 - `8` appendix runs: keep as canonical
@@ -35,6 +44,8 @@ Why RunPod is now the right fit for this repo:
 - the project is built around `.py` entrypoints, not notebooks
 - the selected pod has **2x H100 80 GB**, which is enough to run two independent training jobs in parallel without changing the scientific design
 - `/workspace` acts as the persistent volume, which lets us stop the expensive GPUs between waves without losing checkpoints or logs
+
+Those RunPod specs are intentionally much stronger than the local MacBook Pro for the training phase. The local machine was good enough for the completed evaluation pipeline, but the remote `2x H100 80 GB` shape is what makes the parallel training matrix practical.
 
 The practical execution model is:
 

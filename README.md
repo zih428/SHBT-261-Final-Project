@@ -8,6 +8,23 @@ Resumable, machine-tuned experimentation code for the SHBT 261 TextVQA final pro
 - [textvqa_revised_experiment_plan.md](textvqa_revised_experiment_plan.md): earlier planning doc that explains the original staged funnel and why the project was scoped this way
 - [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md): focused note on why only the training stage moved to remote CUDA and how that boundary stays scientifically clean
 
+## Canonical hardware context
+
+The canonical local evaluation machine for this repo is:
+
+- `MacBook Pro` (`Mac17,6`)
+- `Apple M5 Max`
+- `18` CPU cores
+- `40` GPU cores
+- `64 GB` unified memory
+- `macOS 26.4.1`
+- `Metal 4`
+
+Those specs are the reason the repo is tuned the way it is:
+
+- local evaluation is optimized for Apple Silicon / MPS and resumable single-machine execution
+- the final LoRA training stage is documented separately around remote CUDA hardware rather than assuming that one local machine should carry the whole training matrix
+
 ## What is here
 
 - Typed Python package under `src/textvqa_proj`
