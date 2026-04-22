@@ -403,6 +403,43 @@ def test_write_remote_state_streams_payload_over_stdin(
     assert str(STATE_RELATIVE_PATH) in str(calls[0]["input"])
 
 
+def test_write_remote_state_prefers_full_ssh_sync_target(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr("textvqa_proj.runpod_scheduler.subprocess.run", fake_run)
+
+    _write_remote_state(
+        tmp_path / "runpod_ssh.sh",
+        {
+            "sync_target": {
+                "host": "216.243.220.223",
+                "port": "16291",
+                "user": "root",
+            },
+            "big": "x" * 100_000,
+        },
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["command"][:2] == ["ssh", "-T"]
+    assert "216.243.220.223" in str(calls[0]["command"])
+    assert calls[0]["timeout"] == REMOTE_STATE_WRITE_TIMEOUT_SECONDS
+    assert "x" * 1000 in str(calls[0]["input"])
+
+
 def test_run_scheduler_cycle_tolerates_remote_state_write_failure(
     monkeypatch,
     tmp_path: Path,

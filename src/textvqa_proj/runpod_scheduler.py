@@ -558,6 +558,34 @@ def _run_remote_script(
     )
 
 
+def _run_full_ssh_script(
+    sync_target: dict[str, str],
+    script: str,
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "ssh",
+            "-T",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-i",
+            str(RUNPOD_KEY),
+            "-p",
+            str(sync_target["port"]),
+            f"{sync_target['user']}@{sync_target['host']}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        input=script,
+        timeout=timeout,
+    )
+
+
 def _remote_snapshot_script() -> str:
     return f"""
 import json
@@ -840,6 +868,14 @@ def _write_remote_state(wrapper_path: Path, payload: dict[str, Any]) -> None:
             "exit",
         ]
     )
+    sync_target = _snapshot_sync_target(payload) or _configured_sync_target()
+    if sync_target is not None:
+        _run_full_ssh_script(
+            sync_target,
+            script,
+            timeout=REMOTE_STATE_WRITE_TIMEOUT_SECONDS,
+        )
+        return
     _run_remote_script(
         wrapper_path,
         script,
