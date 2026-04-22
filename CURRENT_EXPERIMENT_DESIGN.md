@@ -47,23 +47,9 @@ The canonical interpretation of the project is:
 
 The full experiment is easier to understand as a staged pipeline rather than a flat list of configs.
 
-```mermaid
-flowchart TD
-    A["TextVQA Data Protocol<br/>Train split<br/>Validation split<br/>2,000-example stratified internal-dev"] --> B["Stage 1: Screening on internal-dev<br/>24 real VLM runs = 4 backbones x 6 settings<br/>6 OCR lexical baseline runs"]
-    B --> C["Promotion Rule<br/>Select top 2 backbones<br/>Promote top 4 settings for each"]
-    C --> D["Stage 2: Finalists on official validation<br/>8 finalist reruns"]
-    D --> E["Winner Backbone Decision<br/>Choose practical project winner<br/>Current training backbone: Qwen2.5-VL-3B"]
-    E --> F["Stage 3A: Core LoRA matrix on Qwen<br/>8 runs = 2 target strategies x 2 ranks x 2 seeds"]
-    F --> G["Training-stage winner selection<br/>Group by family<br/>Use mean internal-dev eval_loss across both seeds<br/>Pick representative best-seed run"]
-    G --> H["Stage 3B: Follow-up training runs<br/>2 OCR ablations: OCR off vs OCR on<br/>2 scaling runs: 25 pct vs full"]
-    F --> I["Post-train adapter evaluation on internal-dev<br/>Evaluate completed trained adapters for accuracy"]
-    H --> I
-    I --> J["Final post-train comparison<br/>Rank trained adapters by internal-dev accuracy<br/>Promote only the final tuned winner or a very small shortlist"]
-    J --> K["Post-train validation evaluation<br/>Run validation only for the promoted tuned winner or shortlist"]
-    D --> L["Stage 4: Appendix robustness runs<br/>8 prompt/decoding stress tests on validation"]
-    K --> M["Final paper-facing evidence<br/>Zero-shot funnel results<br/>Tuned-adapter results<br/>Appendix robustness interpretation"]
-    L --> M
-```
+![End-to-end TextVQA experiment pipeline](docs/figures/textvqa_experiment_pipeline.png)
+
+*Figure 1. End-to-end experiment pipeline for the current TextVQA study. The project follows a staged funnel: stratified internal-dev screening, finalist reruns on the official validation split, backbone selection for LoRA fine-tuning, an `8`-run core Qwen LoRA matrix, and `4` winner-conditioned follow-up training runs. The post-train evaluation stage is separate from the training-stage winner-selection logic: the training follow-ups are chosen by mean internal-dev `eval_loss` across core seeds, whereas completed trained adapters are later ranked by internal-dev accuracy before promoting only the final tuned model, or a very small shortlist, to validation. Appendix robustness runs remain a secondary validation branch that supports the final analysis without altering the main winner-selection funnel.*
 
 Interpretation of the flow:
 
