@@ -473,6 +473,7 @@ def _run_remote_lines(wrapper_path: Path, lines: list[str]) -> subprocess.Comple
 def _remote_snapshot_script() -> str:
     return f"""
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -593,6 +594,11 @@ payload = {{
         "{SYNC_RELATIVE_PATHS[1]}": (repo_root / "{SYNC_RELATIVE_PATHS[1]}").exists(),
         "{SYNC_RELATIVE_PATHS[2]}": (repo_root / "{SYNC_RELATIVE_PATHS[2]}").exists(),
     }},
+    "sync_target": {{
+        "host": os.environ.get("RUNPOD_PUBLIC_IP"),
+        "port": os.environ.get("RUNPOD_TCP_PORT_22"),
+        "user": "root",
+    }},
 }}
 print("{RUNPOD_JSON_START}")
 print(json.dumps(payload, sort_keys=True, default=str))
@@ -646,6 +652,18 @@ def _configured_sync_target() -> dict[str, str] | None:
     return {"host": host, "port": port, "user": user}
 
 
+def _snapshot_sync_target(snapshot: dict[str, Any]) -> dict[str, str] | None:
+    target = snapshot.get("sync_target")
+    if not isinstance(target, dict):
+        return None
+    host = str(target.get("host") or "").strip()
+    if not host:
+        return None
+    port = str(target.get("port") or "22").strip() or "22"
+    user = str(target.get("user") or "root").strip() or "root"
+    return {"host": host, "port": port, "user": user}
+
+
 def _rsync_remote_path(
     sync_target: dict[str, str],
     relative_path: Path,
@@ -680,7 +698,7 @@ def _rsync_remote_path(
 
 
 def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
-    sync_target = _configured_sync_target()
+    sync_target = _configured_sync_target() or _snapshot_sync_target(snapshot)
     if sync_target is None:
         return {
             "synced_paths": [],
@@ -688,7 +706,7 @@ def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
             "sync_ready": False,
             "sync_message": (
                 "Artifact sync is disabled on proxied ssh.runpod.io access. "
-                "Configure RUNPOD_SYNC_HOST/RUNPOD_SYNC_PORT for full SSH over exposed TCP "
+                "Configure RUNPOD_SYNC_HOST/RUNPOD_SYNC_PORT, or expose Pod SSH over TCP, "
                 "to enable rsync of training artifacts."
             ),
         }
@@ -701,7 +719,10 @@ def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
             synced.append(str(relative_path))
     message = "No new artifact files were copied in this cycle."
     if synced:
-        message = "Copied updated artifact paths from RunPod over full SSH."
+        message = (
+            f"Copied updated artifact paths from RunPod over full SSH "
+            f"({sync_target['host']}:{sync_target['port']})."
+        )
     return {
         "synced_paths": synced,
         "sync_mode": "full-ssh",

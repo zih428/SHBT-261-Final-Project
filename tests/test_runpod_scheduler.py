@@ -170,4 +170,44 @@ def test_sync_results_reports_basic_ssh_limitation_without_full_ssh_env(
 
     assert sync_state["synced_paths"] == []
     assert sync_state["sync_mode"] == "disabled-basic-ssh"
-    assert "full SSH" in sync_state["sync_message"]
+    assert "expose Pod SSH over TCP" in sync_state["sync_message"]
+
+
+def test_sync_results_uses_snapshot_full_ssh_target_when_available(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("RUNPOD_SYNC_HOST", raising=False)
+    monkeypatch.delenv("RUNPOD_FULL_SSH_HOST", raising=False)
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_rsync(sync_target, relative_path, repo_root):
+        calls.append((sync_target["host"], sync_target["port"]))
+        return True
+
+    monkeypatch.setattr("textvqa_proj.runpod_scheduler._rsync_remote_path", fake_rsync)
+
+    sync_state = sync_results(
+        tmp_path,
+        {
+            "sync_paths": {
+                "outputs/training": True,
+                "outputs/runs/trained_adapters": False,
+                "outputs/logs/training_matrix": True,
+            },
+            "sync_target": {
+                "host": "216.243.220.223",
+                "port": "16291",
+                "user": "root",
+            },
+        },
+    )
+
+    assert sync_state["sync_mode"] == "full-ssh"
+    assert sync_state["sync_ready"] is True
+    assert sync_state["synced_paths"] == [
+        "outputs/training",
+        "outputs/logs/training_matrix",
+    ]
+    assert calls == [("216.243.220.223", "16291"), ("216.243.220.223", "16291")]
