@@ -346,6 +346,86 @@ def test_render_training_report_prefers_direct_training_when_newer_than_schedule
     assert "600/1024" not in training_report
 
 
+def test_render_training_report_prefers_live_gpu_tasks_when_present() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 4,
+                "running": 2,
+                "pending": 6,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "running",
+            "runs": [
+                {
+                    "config_name": "core_attn_r16_seed07",
+                    "label": "qwen25_vl_3b x core_attn_r16_seed07",
+                    "status": "running",
+                    "current_step": 975,
+                    "max_steps": 1024,
+                    "checkpoint_step": 512,
+                    "updated_at": "2026-04-22T02:26:09+00:00",
+                }
+            ],
+            "live_gpu_tasks": [
+                {
+                    "gpu_id": "0",
+                    "assignment_kind": "training",
+                    "assignment_label": "core_attn_r16_seed13",
+                    "utilization_gpu": 54,
+                    "memory_used": 27553,
+                    "memory_total": 81559,
+                },
+                {
+                    "gpu_id": "1",
+                    "assignment_kind": "training",
+                    "assignment_label": "core_attn_r16_seed07",
+                    "utilization_gpu": 50,
+                    "memory_used": 28191,
+                    "memory_total": 81559,
+                },
+            ],
+            "scheduler": {
+                "polled_at": "2026-04-22T01:57:52+00:00",
+                "remote_git_head": "b07bd70",
+                "plan": {
+                    "gpus": [
+                        {
+                            "gpu_id": "0",
+                            "assignment_kind": "training",
+                            "assignment_label": "stale-seed13",
+                            "utilization_gpu": 12,
+                            "memory_used": 25013,
+                            "memory_total": 81559,
+                        },
+                        {
+                            "gpu_id": "1",
+                            "assignment_kind": "training",
+                            "assignment_label": "stale-seed07",
+                            "utilization_gpu": 11,
+                            "memory_used": 28165,
+                            "memory_total": 81559,
+                        },
+                    ],
+                    "post_train_eval_ready": False,
+                    "first_eleven_completed": False,
+                    "pending_internal_dev_evals": [],
+                    "pending_validation_evals": [],
+                },
+            },
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "core_attn_r16_seed13" in training_report
+    assert "54" in training_report
+    assert "27553/81559" in training_report
+    assert "stale-seed13" not in training_report
+
+
 def test_render_training_report_treats_starting_workers_as_running_stage() -> None:
     summary = {
         "training": {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import subprocess
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -22,7 +23,7 @@ from textvqa_proj.experiment_catalog import (
     TRAINING_MODEL_CONFIG,
 )
 from textvqa_proj.orchestration import evaluation_run_root, training_run_root
-from textvqa_proj.runpod_scheduler import STATE_RELATIVE_PATH
+from textvqa_proj.runpod_scheduler import STATE_RELATIVE_PATH, _classify_gpu_status
 from textvqa_proj.training.trainer import (
     TrainingPaths,
     checkpoint_step_from_path,
@@ -210,6 +211,87 @@ def _latest_grad_norm_cell(run: dict[str, Any]) -> str:
 
 def _latest_scheduler_state(repo_root: Path) -> dict[str, Any] | None:
     return _read_json(repo_root / STATE_RELATIVE_PATH)
+
+
+def _live_runpod_gpu_tasks(
+    repo_root: Path,
+    *,
+    scheduler_state: dict[str, Any] | None,
+    training_matrix_status: dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    try:
+        gpu_output = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+
+    gpu_rows: list[dict[str, Any]] = []
+    for line in gpu_output.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 4:
+            continue
+        try:
+            gpu_rows.append(
+                {
+                    "gpu_id": parts[0],
+                    "utilization_gpu": int(parts[1]),
+                    "memory_used": int(parts[2]),
+                    "memory_total": int(parts[3]),
+                }
+            )
+        except ValueError:
+            continue
+    if not gpu_rows:
+        return None
+
+    active_training: list[dict[str, Any]] = []
+    for config_name, item in (training_matrix_status or {}).get("runs", {}).items():
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") not in {"starting", "running"}:
+            continue
+        gpu_id = item.get("gpu_id")
+        if gpu_id is None:
+            continue
+        active_training.append(
+            {
+                "config_name": config_name,
+                "gpu_id": str(gpu_id),
+                "log_path": item.get("log_path"),
+                "phase": item.get("phase"),
+            }
+        )
+
+    tmux_sessions: list[str] = []
+    try:
+        tmux_output = subprocess.check_output(
+            ["tmux", "list-sessions", "-F", "#S"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        tmux_sessions = [line.strip() for line in tmux_output.splitlines() if line.strip()]
+    except Exception:
+        if isinstance(scheduler_state, dict):
+            tmux_sessions = [
+                str(session)
+                for session in scheduler_state.get("tmux_sessions", [])
+                if isinstance(session, str)
+            ]
+
+    return _classify_gpu_status(
+        {
+            "gpus": gpu_rows,
+            "active_training": active_training,
+            "tmux_sessions": tmux_sessions,
+        }
+    )
 
 
 def _resolve_training_manifest(settings: Any, split: str) -> Path | None:
@@ -751,6 +833,8 @@ def summarize_project_progress(
         _evaluation_progress(repo_root, [*COMMON_CONFIGS, model_config, experiment_config])
         for model_config, experiment_config in product(BASELINE_MODEL_CONFIGS, SCREENING_CONFIGS)
     ]
+    training_matrix_status = _latest_training_matrix_status(repo_root)
+    scheduler_state = _latest_scheduler_state(repo_root)
     training_runs = [
         _training_progress(
             repo_root,
@@ -761,7 +845,7 @@ def summarize_project_progress(
     ]
     training_runs = _overlay_training_matrix_status(
         training_runs,
-        _latest_training_matrix_status(repo_root),
+        training_matrix_status,
     )
     training_runs = _project_training_schedule(
         repo_root,
@@ -854,7 +938,12 @@ def summarize_project_progress(
             "active_run": asdict(active_training) if active_training else None,
             "runs": [asdict(run) for run in training_runs],
             "training_overlays": [str(path) for path in resolved_training_overlays],
-            "scheduler": _latest_scheduler_state(repo_root),
+            "scheduler": scheduler_state,
+            "live_gpu_tasks": _live_runpod_gpu_tasks(
+                repo_root,
+                scheduler_state=scheduler_state,
+                training_matrix_status=training_matrix_status,
+            ),
         },
         "appendix": {
             "counts": appendix_counts,
@@ -1059,7 +1148,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         )
     scheduler = training.get("scheduler")
     if scheduler:
-        lines.extend(_render_scheduler_sections(scheduler))
+        lines.extend(_render_scheduler_sections(scheduler, training.get("live_gpu_tasks")))
     return "\n".join(lines)
 
 
@@ -1138,11 +1227,14 @@ def render_training_report(summary: dict[str, Any]) -> str:
     )
     scheduler = training.get("scheduler")
     if scheduler:
-        lines.extend(_render_scheduler_sections(scheduler))
+        lines.extend(_render_scheduler_sections(scheduler, training.get("live_gpu_tasks")))
     return "\n".join(lines)
 
 
-def _render_scheduler_sections(scheduler: dict[str, Any]) -> list[str]:
+def _render_scheduler_sections(
+    scheduler: dict[str, Any],
+    live_gpu_tasks: list[dict[str, Any]] | None = None,
+) -> list[str]:
     plan = scheduler.get("plan", {})
     scheduler_rows = [
         ["Last poll", _format_short_eastern_cell(scheduler.get("polled_at")) or "-"],
@@ -1176,7 +1268,7 @@ def _render_scheduler_sections(scheduler: dict[str, Any]) -> list[str]:
         _render_table(["Item", "Value"], scheduler_rows),
     ]
 
-    gpus = plan.get("gpus") or scheduler.get("gpus") or []
+    gpus = live_gpu_tasks or plan.get("gpus") or scheduler.get("gpus") or []
     gpu_rows = [
         [
             str(gpu.get("gpu_id", "-")),
