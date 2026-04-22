@@ -117,37 +117,51 @@ def test_scheduler_skips_internal_dev_tasks_already_running_or_completed() -> No
     assert plan["actions"][0]["label"] == "core_all_linear_r32_seed07 internal_dev"
 
 
-def test_scheduler_queues_validation_for_lowest_eval_loss_after_training_and_core_evals_finish() -> None:
+def test_scheduler_queues_validation_for_best_internal_dev_accuracy_after_training_and_core_evals_finish() -> None:
     snapshot = _base_snapshot()
     for run in snapshot["training"]["runs"]:
         run["status"] = "completed"
         run["latest_eval"] = {"eval_loss": 0.7}
     snapshot["training"]["runs"][0]["latest_eval"] = {"eval_loss": 0.42}
-    snapshot["training"]["runs"][11]["latest_eval"] = {"eval_loss": 0.5}
-    for config_name in [
-        "core_all_linear_r16_seed07",
-        "core_all_linear_r16_seed13",
-        "core_all_linear_r32_seed07",
-        "core_all_linear_r32_seed13",
-        "core_attn_r16_seed07",
-        "core_attn_r16_seed13",
-        "core_attn_r32_seed07",
-        "core_attn_r32_seed13",
-    ]:
+    snapshot["training"]["runs"][2]["latest_eval"] = {"eval_loss": 0.6}
+    accuracies = {
+        "core_all_linear_r16_seed07": 0.75,
+        "core_all_linear_r16_seed13": 0.76,
+        "core_all_linear_r32_seed07": 0.81,
+        "core_all_linear_r32_seed13": 0.79,
+        "core_attn_r16_seed07": 0.74,
+        "core_attn_r16_seed13": 0.74,
+        "core_attn_r32_seed07": 0.73,
+        "core_attn_r32_seed13": 0.72,
+    }
+    for config_name, accuracy in accuracies.items():
         snapshot["eval_runs"].append(
             {
                 "config_name": config_name,
                 "split": "internal_dev",
                 "status": "completed",
-                "accuracy": 0.75,
+                "accuracy": accuracy,
             }
         )
 
     plan = build_scheduler_plan(snapshot)
 
     assert plan["training_complete"] is True
-    assert plan["validation_candidate"] == "core_all_linear_r16_seed07"
-    assert plan["actions"][0]["label"] == "core_all_linear_r16_seed07 validation"
+    assert plan["validation_candidate"] == "core_all_linear_r32_seed07"
+    assert plan["actions"][0]["label"] == "core_all_linear_r32_seed07 validation"
+
+
+def test_scheduler_validation_candidate_falls_back_to_training_eval_loss_when_no_adapter_scores() -> None:
+    snapshot = _base_snapshot()
+    for run in snapshot["training"]["runs"]:
+        run["status"] = "completed"
+        run["latest_eval"] = {"eval_loss": 0.9}
+    snapshot["training"]["runs"][5]["latest_eval"] = {"eval_loss": 0.33}
+
+    plan = build_scheduler_plan(snapshot)
+
+    assert plan["training_complete"] is True
+    assert plan["validation_candidate"] == "core_attn_r16_seed13"
 
 
 def test_scheduler_marks_busy_unattributed_gpu_as_non_idle() -> None:

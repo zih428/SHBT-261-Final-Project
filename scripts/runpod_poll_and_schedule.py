@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import sys
 from pathlib import Path
@@ -42,11 +43,21 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    state = run_scheduler_cycle(
-        REPO_ROOT,
-        wrapper_path=(REPO_ROOT / args.wrapper).resolve(),
-        dry_run=args.dry_run,
-    )
+    lock_dir = REPO_ROOT / "outputs/logs/runpod_scheduler"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / "scheduler.lock"
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"skipped: scheduler lock is already held ({lock_path})")
+            return 0
+
+        state = run_scheduler_cycle(
+            REPO_ROOT,
+            wrapper_path=(REPO_ROOT / args.wrapper).resolve(),
+            dry_run=args.dry_run,
+        )
     if args.json:
         print(json.dumps(state, indent=2, sort_keys=True, default=json_default))
         return 0

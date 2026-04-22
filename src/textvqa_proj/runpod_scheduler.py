@@ -222,7 +222,36 @@ def _internal_dev_eval_queue(snapshot: dict[str, Any]) -> list[str]:
 def _validation_candidate(snapshot: dict[str, Any]) -> str | None:
     if not _training_complete(snapshot):
         return None
+
+    completed_internal_dev_scores: dict[str, float] = {}
+    for run in snapshot.get("eval_runs", []):
+        if not isinstance(run, dict):
+            continue
+        if run.get("status") != "completed" or run.get("split") != "internal_dev":
+            continue
+        config_name = run.get("config_name")
+        accuracy = run.get("accuracy")
+        if not isinstance(config_name, str) or config_name not in CORE_TRAINING_CONFIGS:
+            continue
+        if not _is_finite(accuracy):
+            continue
+        completed_internal_dev_scores[config_name] = float(accuracy)
+
     runs_by_name = _training_runs_by_name(snapshot)
+    if completed_internal_dev_scores:
+        ranked_candidates: list[tuple[float, float, str]] = []
+        for config_name, accuracy in completed_internal_dev_scores.items():
+            run = runs_by_name.get(config_name, {})
+            latest_eval = run.get("latest_eval") if isinstance(run, dict) else {}
+            eval_loss = (
+                float(latest_eval.get("eval_loss"))
+                if isinstance(latest_eval, dict) and _is_finite(latest_eval.get("eval_loss"))
+                else math.inf
+            )
+            ranked_candidates.append((-accuracy, eval_loss, config_name))
+        ranked_candidates.sort()
+        return ranked_candidates[0][2]
+
     best_name: str | None = None
     best_eval_loss: float | None = None
     for config_name, run in runs_by_name.items():
