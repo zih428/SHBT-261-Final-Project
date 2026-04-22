@@ -81,6 +81,52 @@ def test_scheduler_uses_idle_gpu_for_internal_dev_core_eval_once_first_eleven_fi
     ]
 
 
+def test_scheduler_queues_followup_internal_dev_evals_after_core_evals_finish() -> None:
+    snapshot = _base_snapshot()
+    for run in snapshot["training"]["runs"]:
+        if run["config_name"] != "scale_best_assumed_full":
+            run["status"] = "completed"
+        else:
+            run["status"] = "running"
+    snapshot["active_training"] = [{"config_name": "scale_best_assumed_full", "gpu_id": "0"}]
+    for config_name in [
+        "core_all_linear_r16_seed07",
+        "core_all_linear_r16_seed13",
+        "core_all_linear_r32_seed07",
+        "core_all_linear_r32_seed13",
+        "core_attn_r16_seed07",
+        "core_attn_r16_seed13",
+        "core_attn_r32_seed07",
+        "core_attn_r32_seed13",
+    ]:
+        snapshot["eval_runs"].append(
+            {
+                "config_name": config_name,
+                "split": "internal_dev",
+                "status": "completed",
+                "accuracy": 0.75,
+            }
+        )
+
+    plan = build_scheduler_plan(snapshot)
+
+    assert plan["post_train_eval_ready"] is True
+    assert plan["pending_internal_dev_evals"] == [
+        "ocr_ablation_off",
+        "ocr_ablation_on",
+        "scale_best_assumed_25pct",
+    ]
+    assert plan["actions"] == [
+        {
+            "kind": "launch-eval",
+            "label": "ocr_ablation_off internal_dev",
+            "gpu_id": "1",
+            "session_name": None,
+            "lines": [],
+        }
+    ]
+
+
 def test_scheduler_skips_internal_dev_tasks_already_running_or_completed() -> None:
     snapshot = _base_snapshot()
     for run in snapshot["training"]["runs"]:
@@ -117,7 +163,7 @@ def test_scheduler_skips_internal_dev_tasks_already_running_or_completed() -> No
     assert plan["actions"][0]["label"] == "core_all_linear_r32_seed07 internal_dev"
 
 
-def test_scheduler_queues_validation_for_best_internal_dev_accuracy_after_training_and_core_evals_finish() -> None:
+def test_scheduler_queues_validation_for_best_internal_dev_accuracy_after_all_post_train_evals_finish() -> None:
     snapshot = _base_snapshot()
     for run in snapshot["training"]["runs"]:
         run["status"] = "completed"
@@ -133,6 +179,10 @@ def test_scheduler_queues_validation_for_best_internal_dev_accuracy_after_traini
         "core_attn_r16_seed13": 0.74,
         "core_attn_r32_seed07": 0.73,
         "core_attn_r32_seed13": 0.72,
+        "ocr_ablation_off": 0.77,
+        "ocr_ablation_on": 0.83,
+        "scale_best_assumed_25pct": 0.7,
+        "scale_best_assumed_full": 0.8,
     }
     for config_name, accuracy in accuracies.items():
         snapshot["eval_runs"].append(
@@ -147,8 +197,8 @@ def test_scheduler_queues_validation_for_best_internal_dev_accuracy_after_traini
     plan = build_scheduler_plan(snapshot)
 
     assert plan["training_complete"] is True
-    assert plan["validation_candidate"] == "core_all_linear_r32_seed07"
-    assert plan["actions"][0]["label"] == "core_all_linear_r32_seed07 validation"
+    assert plan["validation_candidate"] == "ocr_ablation_on"
+    assert plan["actions"][0]["label"] == "ocr_ablation_on validation"
 
 
 def test_scheduler_validation_candidate_falls_back_to_training_eval_loss_when_no_adapter_scores() -> None:
@@ -312,6 +362,9 @@ def test_run_scheduler_cycle_refreshes_snapshot_after_launch_action(
         "core_attn_r16_seed13",
         "core_attn_r32_seed07",
         "core_attn_r32_seed13",
+        "ocr_ablation_off",
+        "ocr_ablation_on",
+        "scale_best_assumed_25pct",
     ]
     written_state = json.loads((tmp_path / STATE_RELATIVE_PATH).read_text())
     assert written_state["plan"]["active_evals"][0]["config_name"] == "core_all_linear_r16_seed07"

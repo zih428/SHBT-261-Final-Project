@@ -38,6 +38,7 @@ ALL_TRAINING_CONFIGS = [path.stem for path in TRAINING_CONFIGS]
 CORE_TRAINING_CONFIGS = [name for name in ALL_TRAINING_CONFIGS if name.startswith("core_")]
 LAST_TRAINING_CONFIG = "scale_best_assumed_full"
 FIRST_ELEVEN_CONFIGS = [name for name in ALL_TRAINING_CONFIGS if name != LAST_TRAINING_CONFIG]
+POST_TRAIN_EVAL_CONFIGS = list(ALL_TRAINING_CONFIGS)
 
 
 @dataclass(slots=True)
@@ -209,7 +210,7 @@ def _internal_dev_eval_queue(snapshot: dict[str, Any]) -> list[str]:
     active_evals = _active_eval_task_keys(snapshot)
     completed_evals = _completed_eval_task_keys(snapshot)
     queue: list[str] = []
-    for config_name in CORE_TRAINING_CONFIGS:
+    for config_name in POST_TRAIN_EVAL_CONFIGS:
         if config_name not in completed:
             continue
         task_key = (config_name, "internal_dev")
@@ -231,7 +232,7 @@ def _validation_candidate(snapshot: dict[str, Any]) -> str | None:
             continue
         config_name = run.get("config_name")
         accuracy = run.get("accuracy")
-        if not isinstance(config_name, str) or config_name not in CORE_TRAINING_CONFIGS:
+        if not isinstance(config_name, str) or config_name not in POST_TRAIN_EVAL_CONFIGS:
             continue
         if not _is_finite(accuracy):
             continue
