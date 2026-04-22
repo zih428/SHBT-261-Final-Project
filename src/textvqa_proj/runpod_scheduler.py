@@ -34,6 +34,7 @@ SYNC_HOST_ENV_VARS = ("RUNPOD_SYNC_HOST", "RUNPOD_FULL_SSH_HOST")
 SYNC_PORT_ENV_VARS = ("RUNPOD_SYNC_PORT", "RUNPOD_FULL_SSH_PORT")
 SYNC_USER_ENV_VARS = ("RUNPOD_SYNC_USER", "RUNPOD_FULL_SSH_USER")
 REMOTE_COMMAND_TIMEOUT_SECONDS = 180
+REMOTE_STATE_WRITE_TIMEOUT_SECONDS = 20
 RSYNC_TIMEOUT_SECONDS = 300
 
 ALL_TRAINING_CONFIGS = [path.stem for path in TRAINING_CONFIGS]
@@ -541,14 +542,19 @@ def _run_remote_lines(wrapper_path: Path, lines: list[str]) -> subprocess.Comple
     )
 
 
-def _run_remote_script(wrapper_path: Path, script: str) -> subprocess.CompletedProcess[str]:
+def _run_remote_script(
+    wrapper_path: Path,
+    script: str,
+    *,
+    timeout: int = REMOTE_COMMAND_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(wrapper_path)],
         check=True,
         capture_output=True,
         text=True,
         input=script,
-        timeout=REMOTE_COMMAND_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
 
 
@@ -834,7 +840,11 @@ def _write_remote_state(wrapper_path: Path, payload: dict[str, Any]) -> None:
             "exit",
         ]
     )
-    _run_remote_script(wrapper_path, script)
+    _run_remote_script(
+        wrapper_path,
+        script,
+        timeout=REMOTE_STATE_WRITE_TIMEOUT_SECONDS,
+    )
 
 
 def _execute_action(
@@ -891,7 +901,20 @@ def run_scheduler_cycle(
         "state_written_at": _iso_now(),
     }
     local_state_path = ensure_dir(repo_root / STATE_RELATIVE_PATH.parent) / STATE_RELATIVE_PATH.name
+    if dry_run:
+        state["remote_state_write_status"] = "skipped"
+    else:
+        state["remote_state_write_status"] = "pending"
     atomic_write_json(local_state_path, state)
     if not dry_run:
-        _write_remote_state(wrapper_path, state)
+        try:
+            _write_remote_state(wrapper_path, state)
+        except (OSError, subprocess.SubprocessError) as exc:
+            state["remote_state_write_status"] = "failed"
+            state["remote_state_write_error"] = str(exc)
+            atomic_write_json(local_state_path, state)
+        else:
+            state["remote_state_write_status"] = "ok"
+            state.pop("remote_state_write_error", None)
+            atomic_write_json(local_state_path, state)
     return state

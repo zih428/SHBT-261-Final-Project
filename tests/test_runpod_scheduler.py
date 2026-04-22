@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from textvqa_proj.runpod_scheduler import (
+    REMOTE_STATE_WRITE_TIMEOUT_SECONDS,
     STATE_RELATIVE_PATH,
     _write_remote_state,
     build_scheduler_plan,
@@ -396,5 +398,87 @@ def test_write_remote_state_streams_payload_over_stdin(
     assert len(calls) == 1
     assert calls[0]["command"] == [str(tmp_path / "runpod_ssh.sh")]
     assert "input" in calls[0]
+    assert calls[0]["timeout"] == REMOTE_STATE_WRITE_TIMEOUT_SECONDS
     assert "x" * 1000 in str(calls[0]["input"])
     assert str(STATE_RELATIVE_PATH) in str(calls[0]["input"])
+
+
+def test_run_scheduler_cycle_tolerates_remote_state_write_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    snapshot = _base_snapshot()
+    for run in snapshot["training"]["runs"]:
+        if run["config_name"] == "scale_best_assumed_full":
+            run["status"] = "running"
+        else:
+            run["status"] = "completed"
+    snapshot["gpus"] = [
+        {
+            "gpu_id": "0",
+            "utilization_gpu": 0,
+            "memory_used": 0,
+            "memory_total": 80_000,
+        },
+        {
+            "gpu_id": "1",
+            "utilization_gpu": 85,
+            "memory_used": 30_000,
+            "memory_total": 80_000,
+        },
+    ]
+    snapshot["active_training"] = [
+        {
+            "config_name": "scale_best_assumed_full",
+            "gpu_id": "1",
+            "log_path": "train.log",
+            "phase": "data-scaling",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler.query_remote_snapshot",
+        lambda repo_root, *, wrapper_path: {
+            **snapshot,
+            "plan": build_scheduler_plan(snapshot),
+        },
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler._execute_action",
+        lambda snapshot, action, *, wrapper_path: {
+            "kind": action["kind"],
+            "label": action["label"],
+            "gpu_id": action.get("gpu_id"),
+            "executed_at": "2026-04-22T10:06:58+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler.sync_results",
+        lambda repo_root, snapshot: {
+            "synced_paths": [],
+            "sync_mode": "dry-test",
+            "sync_ready": True,
+            "sync_message": "ok",
+        },
+    )
+
+    def fail_remote_write(wrapper_path, payload):
+        raise subprocess.TimeoutExpired([str(wrapper_path)], timeout=180)
+
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler._write_remote_state",
+        fail_remote_write,
+    )
+
+    state = run_scheduler_cycle(tmp_path, wrapper_path=tmp_path / "wrapper.sh")
+
+    assert state["remote_state_write_status"] == "failed"
+    assert "timed out after 180 seconds" in state["remote_state_write_error"]
+    written_state = json.loads((tmp_path / STATE_RELATIVE_PATH).read_text())
+    assert written_state["remote_state_write_status"] == "failed"
+    assert written_state["plan"]["actions"][0]["gpu_id"] == "0"
+    assert written_state["plan"]["actions"][0]["kind"] == "launch-eval"
+    assert (
+        written_state["plan"]["actions"][0]["label"]
+        == "core_all_linear_r16_seed07 internal_dev"
+    )
