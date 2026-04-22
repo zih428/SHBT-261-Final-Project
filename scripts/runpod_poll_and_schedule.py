@@ -57,6 +57,8 @@ def main() -> int:
     print(f"first_eleven_completed={plan['first_eleven_completed']}")
     print(f"training_complete={plan['training_complete']}")
     print(f"post_train_eval_ready={plan['post_train_eval_ready']}")
+    print(f"sync_mode={state.get('sync_mode', '-')}")
+    print(f"sync_status={state.get('sync_message', '-')}")
     print(f"free_gpus={','.join(plan['free_gpu_ids']) or '-'}")
     print(
         "pending_internal_dev_evals="

@@ -30,6 +30,9 @@ RUNPOD_HOST = "ssh.runpod.io"
 RUNPOD_USER = "51avwqd4qoob8t-64411fef"
 RUNPOD_KEY = Path.home() / ".ssh/runpod_ed25519"
 EVAL_STALE_AFTER = timedelta(minutes=20)
+SYNC_HOST_ENV_VARS = ("RUNPOD_SYNC_HOST", "RUNPOD_FULL_SSH_HOST")
+SYNC_PORT_ENV_VARS = ("RUNPOD_SYNC_PORT", "RUNPOD_FULL_SSH_PORT")
+SYNC_USER_ENV_VARS = ("RUNPOD_SYNC_USER", "RUNPOD_FULL_SSH_USER")
 
 ALL_TRAINING_CONFIGS = [path.stem for path in TRAINING_CONFIGS]
 CORE_TRAINING_CONFIGS = [name for name in ALL_TRAINING_CONFIGS if name.startswith("core_")]
@@ -628,9 +631,31 @@ def _destination_specs() -> list[tuple[str, str]]:
     return deduped
 
 
-def _rsync_remote_path(remote_destination: str, relative_path: Path, repo_root: Path) -> bool:
+def _configured_sync_target() -> dict[str, str] | None:
+    host = next((os.getenv(name) for name in SYNC_HOST_ENV_VARS if os.getenv(name)), None)
+    if not host:
+        return None
+    port = next(
+        (os.getenv(name) for name in SYNC_PORT_ENV_VARS if os.getenv(name)),
+        "22",
+    )
+    user = next(
+        (os.getenv(name) for name in SYNC_USER_ENV_VARS if os.getenv(name)),
+        "root",
+    )
+    return {"host": host, "port": port, "user": user}
+
+
+def _rsync_remote_path(
+    sync_target: dict[str, str],
+    relative_path: Path,
+    repo_root: Path,
+) -> bool:
     local_path = ensure_dir(repo_root / relative_path)
-    remote_path = f"{RUNPOD_USER}@{remote_destination}:{REMOTE_REPO_ROOT}/{relative_path}/"
+    remote_path = (
+        f"{sync_target['user']}@{sync_target['host']}:"
+        f"{REMOTE_REPO_ROOT}/{relative_path}/"
+    )
     command = [
         "rsync",
         "-az",
@@ -639,7 +664,7 @@ def _rsync_remote_path(remote_destination: str, relative_path: Path, repo_root: 
         (
             "ssh "
             f"-i {shlex.quote(str(RUNPOD_KEY))} "
-            f"-o HostKeyAlias={shlex.quote(RUNPOD_HOST)} "
+            f"-p {shlex.quote(sync_target['port'])} "
             "-o ConnectTimeout=10"
         ),
         remote_path,
@@ -654,17 +679,35 @@ def _rsync_remote_path(remote_destination: str, relative_path: Path, repo_root: 
     return False
 
 
-def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> list[str]:
+def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
+    sync_target = _configured_sync_target()
+    if sync_target is None:
+        return {
+            "synced_paths": [],
+            "sync_mode": "disabled-basic-ssh",
+            "sync_ready": False,
+            "sync_message": (
+                "Artifact sync is disabled on proxied ssh.runpod.io access. "
+                "Configure RUNPOD_SYNC_HOST/RUNPOD_SYNC_PORT for full SSH over exposed TCP "
+                "to enable rsync of training artifacts."
+            ),
+        }
     synced: list[str] = []
     available_sync_paths = snapshot.get("sync_paths", {})
     for relative_path in SYNC_RELATIVE_PATHS:
         if not available_sync_paths.get(str(relative_path)):
             continue
-        for destination, _label in _destination_specs():
-            if _rsync_remote_path(destination, relative_path, repo_root):
-                synced.append(str(relative_path))
-                break
-    return synced
+        if _rsync_remote_path(sync_target, relative_path, repo_root):
+            synced.append(str(relative_path))
+    message = "No new artifact files were copied in this cycle."
+    if synced:
+        message = "Copied updated artifact paths from RunPod over full SSH."
+    return {
+        "synced_paths": synced,
+        "sync_mode": "full-ssh",
+        "sync_ready": True,
+        "sync_message": message,
+    }
 
 
 def _write_remote_state(wrapper_path: Path, payload: dict[str, Any]) -> None:
@@ -718,13 +761,18 @@ def run_scheduler_cycle(
             executed_actions.append(
                 _execute_action(snapshot, action, wrapper_path=wrapper_path)
             )
-        synced_paths = sync_results(repo_root, snapshot)
+        sync_state = sync_results(repo_root, snapshot)
     else:
-        synced_paths = []
+        sync_state = {
+            "synced_paths": [],
+            "sync_mode": "dry-run",
+            "sync_ready": False,
+            "sync_message": "Dry run: skipping artifact sync.",
+        }
     state = {
         **snapshot,
         "executed_actions": executed_actions,
-        "synced_paths": synced_paths,
+        **sync_state,
         "state_written_at": _iso_now(),
     }
     local_state_path = ensure_dir(repo_root / STATE_RELATIVE_PATH.parent) / STATE_RELATIVE_PATH.name

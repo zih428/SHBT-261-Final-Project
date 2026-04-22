@@ -89,6 +89,8 @@ def test_render_progress_report_mentions_stage_counts() -> None:
             "scheduler": {
                 "polled_at": "2026-04-21T23:15:00+00:00",
                 "remote_git_head": "abc1234",
+                "sync_mode": "disabled-basic-ssh",
+                "sync_message": "Artifact sync requires full SSH over exposed TCP.",
                 "synced_paths": ["outputs/training"],
                 "plan": {
                     "post_train_eval_ready": True,
@@ -156,6 +158,8 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "RunPod GPU Tasks" in report
     assert "Scheduler Actions" in report
     assert "Scheduler Sync" in report
+    assert "Artifact sync" in report
+    assert "disabled-basic-ssh" in report
     assert "best-assumed-full" in report
     assert "internal_dev" in report
     assert "128/1024" in report
@@ -187,6 +191,75 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Apr 20  2:00 PM" in training_report
     assert "2h 0m" in training_report
     assert "Screening" not in training_report
+
+
+def test_render_training_report_prefers_live_scheduler_training_snapshot() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 0,
+                "running": 0,
+                "pending": 12,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "pending",
+            "runs": [
+                {
+                    "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                    "status": "pending",
+                }
+            ],
+            "scheduler": {
+                "polled_at": "2026-04-21T23:15:00+00:00",
+                "remote_git_head": "abc1234",
+                "sync_mode": "disabled-basic-ssh",
+                "sync_message": "Artifact sync requires full SSH over exposed TCP.",
+                "training": {
+                    "counts": {
+                        "completed": 4,
+                        "running": 2,
+                        "pending": 6,
+                        "failed": 0,
+                        "other": 0,
+                        "total": 12,
+                    },
+                    "status": "running",
+                    "runs": [
+                        {
+                            "config_name": "core_all_linear_r16_seed07",
+                            "label": "qwen25_vl_3b x core_all_linear_r16_seed07",
+                            "status": "completed",
+                            "current_step": 1024,
+                            "max_steps": 1024,
+                            "checkpoint_step": 1024,
+                        },
+                        {
+                            "config_name": "core_attn_r16_seed07",
+                            "label": "qwen25_vl_3b x core_attn_r16_seed07",
+                            "status": "running",
+                            "current_step": 512,
+                            "max_steps": 1024,
+                        },
+                    ],
+                },
+                "plan": {
+                    "post_train_eval_ready": False,
+                    "first_eleven_completed": False,
+                    "pending_internal_dev_evals": [],
+                    "pending_validation_evals": [],
+                },
+            },
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "4" in training_report
+    assert "2" in training_report
+    assert "core_attn_r16_seed07" in training_report
+    assert "512/1024" in training_report
 
 
 def test_render_training_report_treats_starting_workers_as_running_stage() -> None:

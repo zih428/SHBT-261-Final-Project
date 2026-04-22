@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from textvqa_proj.runpod_scheduler import build_scheduler_plan
+from pathlib import Path
+
+from textvqa_proj.runpod_scheduler import build_scheduler_plan, sync_results
 
 
 def _base_snapshot() -> dict[str, object]:
@@ -146,3 +148,26 @@ def test_scheduler_marks_busy_unattributed_gpu_as_non_idle() -> None:
 
     assert plan["gpus"][1]["assignment_kind"] == "unknown"
     assert plan["free_gpu_ids"] == ["0"]
+
+
+def test_sync_results_reports_basic_ssh_limitation_without_full_ssh_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("RUNPOD_SYNC_HOST", raising=False)
+    monkeypatch.delenv("RUNPOD_FULL_SSH_HOST", raising=False)
+
+    sync_state = sync_results(
+        tmp_path,
+        {
+            "sync_paths": {
+                "outputs/training": True,
+                "outputs/runs/trained_adapters": True,
+                "outputs/logs/training_matrix": True,
+            }
+        },
+    )
+
+    assert sync_state["synced_paths"] == []
+    assert sync_state["sync_mode"] == "disabled-basic-ssh"
+    assert "full SSH" in sync_state["sync_message"]

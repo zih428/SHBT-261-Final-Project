@@ -883,7 +883,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
             "total": finalists.get("planned_runs", 0),
         },
     )
-    training = summary["training"]
+    training = _report_training_state(summary["training"])
     appendix = summary["appendix"]
     prep = summary["prep"]
     active_evaluations = [
@@ -1064,7 +1064,7 @@ def render_progress_report(summary: dict[str, Any]) -> str:
 
 
 def render_training_report(summary: dict[str, Any]) -> str:
-    training = summary["training"]
+    training = _report_training_state(summary["training"])
     counts = training["counts"]
     status = (
         _stage_status(counts)
@@ -1147,6 +1147,8 @@ def _render_scheduler_sections(scheduler: dict[str, Any]) -> list[str]:
     scheduler_rows = [
         ["Last poll", _format_short_eastern_cell(scheduler.get("polled_at")) or "-"],
         ["Remote git HEAD", str(scheduler.get("remote_git_head") or "-")],
+        ["Artifact sync", str(scheduler.get("sync_mode") or "-")],
+        ["Sync status", str(scheduler.get("sync_message") or "-")],
         [
             "Post-train eval window",
             "yes" if plan.get("post_train_eval_ready") else "no",
@@ -1233,3 +1235,18 @@ def _render_scheduler_sections(scheduler: dict[str, Any]) -> list[str]:
             ]
         )
     return lines
+
+
+def _report_training_state(training: dict[str, Any]) -> dict[str, Any]:
+    scheduler = training.get("scheduler")
+    if not isinstance(scheduler, dict):
+        return training
+    remote_training = scheduler.get("training")
+    if not isinstance(remote_training, dict) or not remote_training.get("runs"):
+        return training
+    merged = dict(training)
+    for key in ("counts", "status", "active_run", "runs", "training_overlays"):
+        if key in remote_training:
+            merged[key] = remote_training[key]
+    merged["scheduler"] = scheduler
+    return merged
