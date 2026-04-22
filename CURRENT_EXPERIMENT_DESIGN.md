@@ -43,7 +43,36 @@ The canonical interpretation of the project is:
 - local Apple-Silicon runs remain the canonical completed **evaluation** results
 - the final **training** matrix is being rerun cleanly on rented CUDA hardware
 
-## 1A. Local machine context
+## 1A. End-to-end study flow
+
+The full experiment is easier to understand as a staged pipeline rather than a flat list of configs.
+
+```mermaid
+flowchart TD
+    A["TextVQA Data Protocol<br/>Train split<br/>Validation split<br/>2,000-example stratified internal-dev"] --> B["Stage 1: Screening on internal-dev<br/>24 real VLM runs = 4 backbones x 6 settings<br/>6 OCR lexical baseline runs"]
+    B --> C["Promotion Rule<br/>Select top 2 backbones<br/>Promote top 4 settings for each"]
+    C --> D["Stage 2: Finalists on official validation<br/>8 finalist reruns"]
+    D --> E["Winner Backbone Decision<br/>Choose practical project winner<br/>Current training backbone: Qwen2.5-VL-3B"]
+    E --> F["Stage 3A: Core LoRA matrix on Qwen<br/>8 runs = 2 target strategies x 2 ranks x 2 seeds"]
+    F --> G["Training-stage winner selection<br/>Group by family<br/>Use mean internal-dev eval_loss across both seeds<br/>Pick representative best-seed run"]
+    G --> H["Stage 3B: Follow-up training runs<br/>2 OCR ablations: OCR off vs OCR on<br/>2 scaling runs: 25 pct vs full"]
+    F --> I["Post-train adapter evaluation on internal-dev<br/>Evaluate completed trained adapters for accuracy"]
+    H --> I
+    I --> J["Final post-train comparison<br/>Rank trained adapters by internal-dev accuracy<br/>Promote only the final tuned winner or a very small shortlist"]
+    J --> K["Post-train validation evaluation<br/>Run validation only for the promoted tuned winner or shortlist"]
+    D --> L["Stage 4: Appendix robustness runs<br/>8 prompt/decoding stress tests on validation"]
+    K --> M["Final paper-facing evidence<br/>Zero-shot funnel results<br/>Tuned-adapter results<br/>Appendix robustness interpretation"]
+    L --> M
+```
+
+Interpretation of the flow:
+
+- Stages `1`, `2`, and `4` are the canonical evaluation record and remain local.
+- Stage `3` is the only part moved to remote CUDA hardware.
+- The `best-assumed-*` follow-ups are not arbitrary extras; they are generated from the completed core training winner family.
+- Post-train adapter evaluation is a separate step after training and uses accuracy-based comparison, while the training-stage winner selection uses `eval_loss`.
+
+## 1B. Local machine context
 
 The canonical local evaluation machine for this project is:
 
