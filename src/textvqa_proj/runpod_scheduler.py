@@ -33,6 +33,8 @@ EVAL_STALE_AFTER = timedelta(minutes=20)
 SYNC_HOST_ENV_VARS = ("RUNPOD_SYNC_HOST", "RUNPOD_FULL_SSH_HOST")
 SYNC_PORT_ENV_VARS = ("RUNPOD_SYNC_PORT", "RUNPOD_FULL_SSH_PORT")
 SYNC_USER_ENV_VARS = ("RUNPOD_SYNC_USER", "RUNPOD_FULL_SSH_USER")
+REMOTE_COMMAND_TIMEOUT_SECONDS = 180
+RSYNC_TIMEOUT_SECONDS = 300
 
 ALL_TRAINING_CONFIGS = [path.stem for path in TRAINING_CONFIGS]
 CORE_TRAINING_CONFIGS = [name for name in ALL_TRAINING_CONFIGS if name.startswith("core_")]
@@ -535,6 +537,7 @@ def _run_remote_lines(wrapper_path: Path, lines: list[str]) -> subprocess.Comple
         check=True,
         capture_output=True,
         text=True,
+        timeout=REMOTE_COMMAND_TIMEOUT_SECONDS,
     )
 
 
@@ -545,6 +548,7 @@ def _run_remote_script(wrapper_path: Path, script: str) -> subprocess.CompletedP
         capture_output=True,
         text=True,
         input=script,
+        timeout=REMOTE_COMMAND_TIMEOUT_SECONDS,
     )
 
 
@@ -770,7 +774,12 @@ def _rsync_remote_path(
         remote_path,
         f"{local_path}/",
     ]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=RSYNC_TIMEOUT_SECONDS,
+    )
     if result.returncode == 0:
         return True
     stderr = result.stderr.casefold()
