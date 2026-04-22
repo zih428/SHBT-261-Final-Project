@@ -86,6 +86,43 @@ def test_render_progress_report_mentions_stage_counts() -> None:
                     "status": "pending",
                 },
             ],
+            "scheduler": {
+                "polled_at": "2026-04-21T23:15:00+00:00",
+                "remote_git_head": "abc1234",
+                "synced_paths": ["outputs/training"],
+                "plan": {
+                    "post_train_eval_ready": True,
+                    "first_eleven_completed": True,
+                    "pending_internal_dev_evals": ["core_all_linear_r32_seed07"],
+                    "pending_validation_evals": [],
+                    "validation_candidate": "core_all_linear_r16_seed07",
+                    "gpus": [
+                        {
+                            "gpu_id": "0",
+                            "assignment_kind": "training",
+                            "assignment_label": "best-assumed-full",
+                            "utilization_gpu": 62,
+                            "memory_used": 28000,
+                            "memory_total": 81559,
+                        },
+                        {
+                            "gpu_id": "1",
+                            "assignment_kind": "eval",
+                            "assignment_label": "core_all_linear_r16_seed07 (internal_dev)",
+                            "utilization_gpu": 24,
+                            "memory_used": 12000,
+                            "memory_total": 81559,
+                        },
+                    ],
+                    "actions": [
+                        {
+                            "kind": "launch-eval",
+                            "gpu_id": "1",
+                            "label": "core_all_linear_r32_seed07 internal_dev",
+                        }
+                    ],
+                },
+            },
         },
         "appendix": {
             "counts": {
@@ -115,6 +152,12 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "86/2000" in report
     assert "1h 0m" in report
     assert "Training Queue" in report
+    assert "RunPod Scheduler" in report
+    assert "RunPod GPU Tasks" in report
+    assert "Scheduler Actions" in report
+    assert "Scheduler Sync" in report
+    assert "best-assumed-full" in report
+    assert "internal_dev" in report
     assert "128/1024" in report
     assert "Loss" in report
     assert "Grad" in report
@@ -132,6 +175,8 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "TextVQA Training Progress" in training_report
     assert "Summary" in training_report
     assert "All Runs" in training_report
+    assert "RunPod Scheduler" in training_report
+    assert "RunPod GPU Tasks" in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "Loss" in training_report
     assert "Grad" in training_report

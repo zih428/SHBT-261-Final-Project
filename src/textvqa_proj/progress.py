@@ -22,6 +22,7 @@ from textvqa_proj.experiment_catalog import (
     TRAINING_MODEL_CONFIG,
 )
 from textvqa_proj.orchestration import evaluation_run_root, training_run_root
+from textvqa_proj.runpod_scheduler import STATE_RELATIVE_PATH
 from textvqa_proj.training.trainer import (
     TrainingPaths,
     checkpoint_step_from_path,
@@ -205,6 +206,10 @@ def _latest_grad_norm_cell(run: dict[str, Any]) -> str:
     if not isinstance(latest_log, dict):
         return "-"
     return _format_metric_value(latest_log.get("grad_norm"))
+
+
+def _latest_scheduler_state(repo_root: Path) -> dict[str, Any] | None:
+    return _read_json(repo_root / STATE_RELATIVE_PATH)
 
 
 def _resolve_training_manifest(settings: Any, split: str) -> Path | None:
@@ -849,6 +854,7 @@ def summarize_project_progress(
             "active_run": asdict(active_training) if active_training else None,
             "runs": [asdict(run) for run in training_runs],
             "training_overlays": [str(path) for path in resolved_training_overlays],
+            "scheduler": _latest_scheduler_state(repo_root),
         },
         "appendix": {
             "counts": appendix_counts,
@@ -1051,6 +1057,9 @@ def render_progress_report(summary: dict[str, Any]) -> str:
                 ),
             ]
         )
+    scheduler = training.get("scheduler")
+    if scheduler:
+        lines.extend(_render_scheduler_sections(scheduler))
     return "\n".join(lines)
 
 
@@ -1127,4 +1136,100 @@ def render_training_report(summary: dict[str, Any]) -> str:
             ),
         ]
     )
+    scheduler = training.get("scheduler")
+    if scheduler:
+        lines.extend(_render_scheduler_sections(scheduler))
     return "\n".join(lines)
+
+
+def _render_scheduler_sections(scheduler: dict[str, Any]) -> list[str]:
+    plan = scheduler.get("plan", {})
+    scheduler_rows = [
+        ["Last poll", _format_short_eastern_cell(scheduler.get("polled_at")) or "-"],
+        ["Remote git HEAD", str(scheduler.get("remote_git_head") or "-")],
+        [
+            "Post-train eval window",
+            "yes" if plan.get("post_train_eval_ready") else "no",
+        ],
+        [
+            "First 11 training runs done",
+            "yes" if plan.get("first_eleven_completed") else "no",
+        ],
+        [
+            "Pending internal-dev evals",
+            str(len(plan.get("pending_internal_dev_evals") or [])),
+        ],
+        [
+            "Pending validation evals",
+            str(len(plan.get("pending_validation_evals") or [])),
+        ],
+        [
+            "Next validation candidate",
+            str(plan.get("validation_candidate") or "-"),
+        ],
+    ]
+    lines = [
+        "",
+        "RunPod Scheduler",
+        _render_table(["Item", "Value"], scheduler_rows),
+    ]
+
+    gpus = plan.get("gpus") or scheduler.get("gpus") or []
+    gpu_rows = [
+        [
+            str(gpu.get("gpu_id", "-")),
+            str(gpu.get("assignment_kind", "-")),
+            _ellipsize(str(gpu.get("assignment_label", "-")), 40),
+            str(gpu.get("utilization_gpu", "-")),
+            (
+                "-"
+                if gpu.get("memory_used") is None or gpu.get("memory_total") is None
+                else f"{gpu['memory_used']}/{gpu['memory_total']}"
+            ),
+        ]
+        for gpu in gpus
+        if isinstance(gpu, dict)
+    ]
+    if gpu_rows:
+        lines.extend(
+            [
+                "",
+                "RunPod GPU Tasks",
+                _render_table(
+                    ["GPU", "Task", "Detail", "Util %", "Mem (MB)"],
+                    gpu_rows,
+                ),
+            ]
+        )
+
+    action_rows = [
+        [
+            str(action.get("kind", "-")),
+            str(action.get("gpu_id", "-")),
+            _ellipsize(str(action.get("label", "-")), 48),
+        ]
+        for action in plan.get("actions") or []
+        if isinstance(action, dict)
+    ]
+    if action_rows:
+        lines.extend(
+            [
+                "",
+                "Scheduler Actions",
+                _render_table(["Kind", "GPU", "Label"], action_rows),
+            ]
+        )
+
+    synced_paths = scheduler.get("synced_paths") or []
+    if synced_paths:
+        lines.extend(
+            [
+                "",
+                "Scheduler Sync",
+                _render_table(
+                    ["Path"],
+                    [[str(path)] for path in synced_paths],
+                ),
+            ]
+        )
+    return lines
