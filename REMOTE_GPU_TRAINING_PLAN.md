@@ -239,19 +239,6 @@ Once the first `11` training runs are done, the repo now starts post-train adapt
 Example live snapshot from `scripts/progress_report.py` on April 22, 2026:
 
 ```text
-Training Overview
-+----------------------+---------+
-| Item                 | Value   |
-+======================+=========+
-| Training status      | running |
-| Completed runs       | 11      |
-| Running runs         | 1       |
-| Pending runs         | 0       |
-| Failed runs          | 0       |
-| Total runs           | 12      |
-| Active training GPUs | 1       |
-+----------------------+---------+
-
 Training Runs
 +-----------------------+-----+-----------+-----------+------+--------+-------+-----------------+--------+----------------------+--------------------+
 | Run                   | GPU | Status    | Progress  | Ckpt | Loss   | Grad  | Updated (ET)    | ETA    | Projected Start (ET) | Projected End (ET) |
@@ -272,17 +259,16 @@ RunPod Scheduler Status
 | Artifact sync               | full-ssh (outputs/training, outputs/runs/trained_adapters, outputs/logs/train... |
 +-----------------------------+----------------------------------------------------------------------------------+
 
-Post-Train Eval Queue
-+---------+-----+----------------------------+--------------+----------+-----+----------------------+--------------------+
-| Status  | GPU | Run                        | Split        | Progress | ETA | Projected Start (ET) | Projected End (ET) |
-+=========+=====+============================+==============+==========+=====+======================+====================+
-| running | 0   | core_all_linear_r32_seed07 | internal_dev | -        | -   | now                  | -                  |
-| pending | -   | core_all_linear_r32_seed13 | internal_dev | -        | -   | Apr 22  4:52 AM      | Apr 22  5:04 AM    |
-| pending | -   | core_attn_r16_seed07       | internal_dev | -        | -   | Apr 22  5:04 AM      | Apr 22  5:15 AM    |
-| pending | -   | core_attn_r16_seed13       | internal_dev | -        | -   | Apr 22  5:15 AM      | Apr 22  5:27 AM    |
-| pending | -   | core_attn_r32_seed07       | internal_dev | -        | -   | Apr 22  5:27 AM      | Apr 22  5:39 AM    |
-| pending | -   | core_attn_r32_seed13       | internal_dev | -        | -   | Apr 22  5:39 AM      | Apr 22  5:50 AM    |
-+---------+-----+----------------------------+--------------+----------+-----+----------------------+--------------------+
+Post-Train Eval Runs
++-----------+-----+----------------------------+--------------+-----------+-----+----------------------+--------------------+
+| Status    | GPU | Run                        | Split        | Progress  | ETA | Projected Start (ET) | Projected End (ET) |
++===========+=====+============================+==============+===========+=====+======================+====================+
+| completed | -   | core_all_linear_r16_seed07 | internal_dev | 2000/2000 | -   | -                    | -                  |
+| completed | -   | core_all_linear_r16_seed13 | internal_dev | 2000/2000 | -   | -                    | -                  |
+| running   | 0   | core_all_linear_r32_seed07 | internal_dev | 1081/2000 | 5m  | now                  | Apr 22  4:51 AM    |
+| pending   | -   | core_all_linear_r32_seed13 | internal_dev | -         | -   | Apr 22  4:51 AM      | Apr 22  5:03 AM    |
+| pending   | -   | core_attn_r16_seed07       | internal_dev | -         | -   | Apr 22  5:03 AM      | Apr 22  5:14 AM    |
++-----------+-----+----------------------------+--------------+-----------+-----+----------------------+--------------------+
 
 RunPod GPU Work
 +-----+----------+------------------------------------+--------+-------------+
@@ -293,4 +279,4 @@ RunPod GPU Work
 +-----+----------+------------------------------------+--------+-------------+
 ```
 
-That snapshot is exactly the intended operating mode for the tail of the experiment: keep the expensive `2x H100` pod fully utilized by letting one GPU finish the last training job while the other GPU starts draining the scientifically allowed `internal_dev` post-train eval queue.
+That snapshot is exactly the intended operating mode for the tail of the experiment: keep the expensive `2x H100` pod fully utilized by letting one GPU finish the last training job while the other GPU starts draining the scientifically allowed post-train eval queue. The table is not limited to `internal_dev` in principle; it shows any completed/running/pending trained-adapter evals that exist, including validation once the promotion policy allows those runs to start.

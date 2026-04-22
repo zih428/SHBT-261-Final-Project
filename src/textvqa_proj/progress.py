@@ -316,6 +316,14 @@ def _eval_queue_rows(
 
     pending_internal = [str(item) for item in (plan.get("pending_internal_dev_evals") or [])]
     pending_validation = [str(item) for item in (plan.get("pending_validation_evals") or [])]
+    active_task_keys = {
+        (str(item.get("config_name") or ""), str(item.get("split") or ""))
+        for item in active_evals
+    }
+    pending_task_keys = {
+        *((config_name, "internal_dev") for config_name in pending_internal),
+        *((config_name, "validation") for config_name in pending_validation),
+    }
 
     gpus = live_gpu_tasks or plan.get("gpus") or scheduler.get("gpus") or []
     now = _current_utc()
@@ -412,6 +420,30 @@ def _eval_queue_rows(
                 _format_eta_duration(updated_at=run.get("updated_at"), eta_at=eta_at) or "-",
                 "now",
                 _format_short_eastern_cell(eta_at) or "-",
+            ]
+        )
+
+    completed_items = sorted(
+        (
+            (config_name, split, run)
+            for (config_name, split), run in eval_runs.items()
+            if str(run.get("status") or "") == "completed"
+            and (config_name, split) not in active_task_keys
+            and (config_name, split) not in pending_task_keys
+        ),
+        key=lambda item: (item[1], item[0]),
+    )
+    for config_name, split, run in completed_items:
+        rows.append(
+            [
+                "completed",
+                "-",
+                _ellipsize(config_name, 28),
+                split,
+                _eval_progress_cell(run),
+                "-",
+                "-",
+                "-",
             ]
         )
 
@@ -1394,34 +1426,6 @@ def render_progress_report(summary: dict[str, Any]) -> str:
 
 def render_training_report(summary: dict[str, Any]) -> str:
     training = _report_training_state(summary["training"])
-    counts = training["counts"]
-    status = (
-        _stage_status(counts)
-        if counts["running"] > 0 or counts["failed"] > 0 or counts["completed"] > 0
-        else "pending"
-    )
-
-    gpu_snapshot = training.get("live_gpu_tasks")
-    if not gpu_snapshot:
-        scheduler = training.get("scheduler") or {}
-        if isinstance(scheduler, dict):
-            plan = scheduler.get("plan") or {}
-            if isinstance(plan, dict):
-                gpu_snapshot = plan.get("gpus")
-    active_training_gpus = sum(
-        1
-        for gpu in (gpu_snapshot or [])
-        if isinstance(gpu, dict) and str(gpu.get("assignment_kind") or "") == "training"
-    )
-    overview_rows = [
-        ["Training status", status],
-        ["Completed runs", str(counts["completed"])],
-        ["Running runs", str(counts["running"])],
-        ["Pending runs", str(counts["pending"])],
-        ["Failed runs", str(counts.get("failed", 0))],
-        ["Total runs", str(counts["total"])],
-        ["Active training GPUs", str(active_training_gpus)],
-    ]
 
     all_rows = []
     for run in training.get("runs") or []:
@@ -1458,9 +1462,6 @@ def render_training_report(summary: dict[str, Any]) -> str:
 
     lines = [
         "TextVQA Training Progress",
-        "",
-        "Training Overview",
-        _render_table(["Item", "Value"], overview_rows),
     ]
     lines.extend(
         [
@@ -1541,7 +1542,7 @@ def _render_scheduler_sections(
         lines.extend(
             [
                 "",
-                "Post-Train Eval Queue",
+                "Post-Train Eval Runs",
                 _render_table(
                     ["Status", "GPU", "Run", "Split", "Progress", "ETA", "Projected Start (ET)", "Projected End (ET)"],
                     eval_rows,

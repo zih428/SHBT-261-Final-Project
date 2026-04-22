@@ -176,7 +176,7 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Training Runs" in report
     assert "RunPod Scheduler Status" in report
     assert "RunPod GPU Work" in report
-    assert "Post-Train Eval Queue" in report
+    assert "Post-Train Eval Runs" in report
     assert "Artifact sync" in report
     assert "disabled-basic-ssh" in report
     assert "best-assumed-full" in report
@@ -199,12 +199,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     training_report = render_training_report(summary)
 
     assert "TextVQA Training Progress" in training_report
-    assert "Training Overview" in training_report
     assert "Training Runs" in training_report
     assert "RunPod Scheduler Status" in training_report
     assert "RunPod GPU Work" in training_report
-    assert "Post-Train Eval Queue" in training_report
-    assert "Active training GPUs" in training_report
+    assert "Post-Train Eval Runs" in training_report
     assert "GPU" in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "Loss" in training_report
@@ -533,7 +531,7 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
 
     training_report = render_training_report(summary)
 
-    assert "Post-Train Eval Queue" in training_report
+    assert "Post-Train Eval Runs" in training_report
     assert "running" in training_report
     assert "pending" in training_report
     assert "core_all_linear_r16_seed07" in training_report
@@ -541,6 +539,68 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
     assert "1 running, 2 pending" in training_report
     assert "100/2000" in training_report
     assert "now" in training_report
+
+
+def test_render_training_report_lists_completed_eval_runs_across_splits() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 12,
+                "running": 0,
+                "pending": 0,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "completed",
+            "runs": [
+                {
+                    "config_name": "scale_best_assumed_full",
+                    "label": "qwen25_vl_3b x scale_best_assumed_full",
+                    "status": "completed",
+                    "current_step": 4076,
+                    "max_steps": 4076,
+                }
+            ],
+            "scheduler": {
+                "polled_at": "2026-04-22T12:00:00+00:00",
+                "remote_git_head": "abc1234",
+                "sync_mode": "full-ssh",
+                "synced_paths": ["outputs/runs/trained_adapters"],
+                "eval_runs": [
+                    {
+                        "config_name": "core_all_linear_r16_seed07",
+                        "split": "internal_dev",
+                        "status": "completed",
+                        "processed_count": 2000,
+                        "total_count": 2000,
+                    },
+                    {
+                        "config_name": "core_all_linear_r32_seed07",
+                        "split": "validation",
+                        "status": "completed",
+                        "processed_count": 5000,
+                        "total_count": 5000,
+                    },
+                ],
+                "plan": {
+                    "post_train_eval_ready": True,
+                    "first_eleven_completed": True,
+                    "active_evals": [],
+                    "pending_internal_dev_evals": [],
+                    "pending_validation_evals": [],
+                    "validation_candidate": "core_all_linear_r32_seed07",
+                },
+            },
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "completed" in training_report
+    assert "2000/2000" in training_report
+    assert "5000/5000" in training_report
+    assert "validation" in training_report
 
 
 def test_render_training_report_prefers_live_eval_queue_over_stale_scheduler_snapshot() -> None:
@@ -658,7 +718,7 @@ def test_render_training_report_treats_starting_workers_as_running_stage() -> No
 
     training_report = render_training_report(summary)
 
-    assert "Training Overview" in training_report
+    assert "Training Runs" in training_report
     assert "blocked until finalist selection completes" not in training_report
     assert "Active Runs" not in training_report
     assert "core_all_linear_r16_seed07" in training_report
