@@ -231,3 +231,66 @@ The current remote execution policy is:
 3. Stop the pod whenever no active phase is running.
 
 That keeps the remote training stage clean, resumable, and separate from the already-finished local evaluation record.
+
+## Live orchestration snapshot
+
+Once the first `11` training runs are done, the repo now starts post-train adapter evals on the idle GPU while the last long training run continues on the other GPU. The report is designed to make that orchestration obvious at a glance.
+
+Example live snapshot from `scripts/progress_report.py` on April 22, 2026:
+
+```text
+Training Overview
++----------------------+---------+
+| Item                 | Value   |
++======================+=========+
+| Training status      | running |
+| Completed runs       | 11      |
+| Running runs         | 1       |
+| Pending runs         | 0       |
+| Failed runs          | 0       |
+| Total runs           | 12      |
+| Active training GPUs | 1       |
++----------------------+---------+
+
+Training Runs
++-----------------------+-----+-----------+-----------+------+--------+-------+-----------------+--------+----------------------+--------------------+
+| Run                   | GPU | Status    | Progress  | Ckpt | Loss   | Grad  | Updated (ET)    | ETA    | Projected Start (ET) | Projected End (ET) |
++=======================+=====+===========+===========+======+========+=======+=================+========+======================+====================+
+| best-assumed-full     | 1   | running   | 1300/4076 | 1024 | 0.5127 | 6.133 | Apr 22  4:51 AM | 5h 11m | now                  | Apr 22 10:02 AM    |
++-----------------------+-----+-----------+-----------+------+--------+-------+-----------------+--------+----------------------+--------------------+
+
+RunPod Scheduler Status
++-----------------------------+----------------------------------------------------------------------------------+
+| Item                        | Value                                                                            |
++=============================+==================================================================================+
+| Last poll                   | Apr 22  4:52 AM                                                                  |
+| Remote git HEAD             | 25627bb                                                                          |
+| Post-train eval window      | yes                                                                              |
+| First 11 training runs done | yes                                                                              |
+| Eval queue                  | 1 running, 5 pending                                                             |
+| Next validation candidate   | -                                                                                |
+| Artifact sync               | full-ssh (outputs/training, outputs/runs/trained_adapters, outputs/logs/train... |
++-----------------------------+----------------------------------------------------------------------------------+
+
+Post-Train Eval Queue
++---------+-----+----------------------------+--------------+----------+-----+----------------------+--------------------+
+| Status  | GPU | Run                        | Split        | Progress | ETA | Projected Start (ET) | Projected End (ET) |
++=========+=====+============================+==============+==========+=====+======================+====================+
+| running | 0   | core_all_linear_r32_seed07 | internal_dev | -        | -   | now                  | -                  |
+| pending | -   | core_all_linear_r32_seed13 | internal_dev | -        | -   | Apr 22  4:52 AM      | Apr 22  5:04 AM    |
+| pending | -   | core_attn_r16_seed07       | internal_dev | -        | -   | Apr 22  5:04 AM      | Apr 22  5:15 AM    |
+| pending | -   | core_attn_r16_seed13       | internal_dev | -        | -   | Apr 22  5:15 AM      | Apr 22  5:27 AM    |
+| pending | -   | core_attn_r32_seed07       | internal_dev | -        | -   | Apr 22  5:27 AM      | Apr 22  5:39 AM    |
+| pending | -   | core_attn_r32_seed13       | internal_dev | -        | -   | Apr 22  5:39 AM      | Apr 22  5:50 AM    |
++---------+-----+----------------------------+--------------+----------+-----+----------------------+--------------------+
+
+RunPod GPU Work
++-----+----------+------------------------------------+--------+-------------+
+| GPU | Work     | Run                                | Util % | Mem (MB)    |
++=====+==========+====================================+========+=============+
+| 0   | eval     | core_all_linear_r32_seed07 (int... | 0      | 0/81559     |
+| 1   | training | scale_best_assumed_full            | 55     | 37193/81559 |
++-----+----------+------------------------------------+--------+-------------+
+```
+
+That snapshot is exactly the intended operating mode for the tail of the experiment: keep the expensive `2x H100` pod fully utilized by letting one GPU finish the last training job while the other GPU starts draining the scientifically allowed `internal_dev` post-train eval queue.

@@ -209,6 +209,37 @@ def _latest_grad_norm_cell(run: dict[str, Any]) -> str:
     return _format_metric_value(latest_log.get("grad_norm"))
 
 
+def _training_gpu_cell(
+    run: dict[str, Any],
+    *,
+    live_gpu_tasks: list[dict[str, Any]] | None = None,
+    scheduler: dict[str, Any] | None = None,
+) -> str:
+    if str(run.get("status") or "") not in {"running", "starting"}:
+        return "-"
+    gpu_tasks = live_gpu_tasks
+    if gpu_tasks is None and isinstance(scheduler, dict):
+        plan = scheduler.get("plan") or {}
+        if isinstance(plan, dict):
+            gpu_tasks = plan.get("gpus")
+    if not gpu_tasks:
+        return "-"
+
+    run_names = {
+        str(run.get("config_name") or ""),
+        _training_display_name(run),
+    }
+    for gpu in gpu_tasks:
+        if not isinstance(gpu, dict):
+            continue
+        if str(gpu.get("assignment_kind") or "") != "training":
+            continue
+        label = str(gpu.get("assignment_label") or "")
+        if label in run_names:
+            return str(gpu.get("gpu_id") or "-")
+    return "-"
+
+
 def _eval_progress_cell(run: dict[str, Any]) -> str:
     processed = run.get("processed_count")
     total = run.get("total_count")
@@ -1262,6 +1293,11 @@ def render_progress_report(summary: dict[str, Any]) -> str:
     training_rows = [
         [
             _ellipsize(_training_display_name(run), 28),
+            _training_gpu_cell(
+                run,
+                live_gpu_tasks=training.get("live_gpu_tasks"),
+                scheduler=training.get("scheduler"),
+            ),
             str(run.get("status", "-")),
             _progress_cell(run),
             _checkpoint_cell(run),
@@ -1331,10 +1367,11 @@ def render_progress_report(summary: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "Training Queue",
+                "Training Runs",
                 _render_table(
                     [
                         "Run",
+                        "GPU",
                         "Status",
                         "Progress",
                         "Ckpt",
@@ -1364,20 +1401,38 @@ def render_training_report(summary: dict[str, Any]) -> str:
         else "pending"
     )
 
-    summary_rows = [[
-        str(counts["completed"]),
-        str(counts["running"]),
-        str(counts["pending"]),
-        str(counts.get("failed", 0)),
-        str(counts["total"]),
-        status,
-    ]]
+    gpu_snapshot = training.get("live_gpu_tasks")
+    if not gpu_snapshot:
+        scheduler = training.get("scheduler") or {}
+        if isinstance(scheduler, dict):
+            plan = scheduler.get("plan") or {}
+            if isinstance(plan, dict):
+                gpu_snapshot = plan.get("gpus")
+    active_training_gpus = sum(
+        1
+        for gpu in (gpu_snapshot or [])
+        if isinstance(gpu, dict) and str(gpu.get("assignment_kind") or "") == "training"
+    )
+    overview_rows = [
+        ["Training status", status],
+        ["Completed runs", str(counts["completed"])],
+        ["Running runs", str(counts["running"])],
+        ["Pending runs", str(counts["pending"])],
+        ["Failed runs", str(counts.get("failed", 0))],
+        ["Total runs", str(counts["total"])],
+        ["Active training GPUs", str(active_training_gpus)],
+    ]
 
     all_rows = []
     for run in training.get("runs") or []:
         all_rows.append(
             [
                 _ellipsize(_training_display_name(run), 28),
+                _training_gpu_cell(
+                    run,
+                    live_gpu_tasks=training.get("live_gpu_tasks"),
+                    scheduler=training.get("scheduler"),
+                ),
                 str(run.get("status", "-")),
                 _progress_cell(run),
                 _checkpoint_cell(run),
@@ -1404,16 +1459,17 @@ def render_training_report(summary: dict[str, Any]) -> str:
     lines = [
         "TextVQA Training Progress",
         "",
-        "Summary",
-        _render_table(["Done", "Run", "Pend", "Fail", "Total", "Status"], summary_rows),
+        "Training Overview",
+        _render_table(["Item", "Value"], overview_rows),
     ]
     lines.extend(
         [
             "",
-            "All Runs",
+            "Training Runs",
             _render_table(
                 [
                     "Run",
+                    "GPU",
                     "Status",
                     "Progress",
                     "Ckpt",
@@ -1477,7 +1533,7 @@ def _render_scheduler_sections(
     ]
     lines = [
         "",
-        "RunPod Scheduler",
+        "RunPod Scheduler Status",
         _render_table(["Item", "Value"], scheduler_rows),
     ]
 
@@ -1485,7 +1541,7 @@ def _render_scheduler_sections(
         lines.extend(
             [
                 "",
-                "RunPod Eval Queue",
+                "Post-Train Eval Queue",
                 _render_table(
                     ["Status", "GPU", "Run", "Split", "Progress", "ETA", "Projected Start (ET)", "Projected End (ET)"],
                     eval_rows,
@@ -1513,7 +1569,7 @@ def _render_scheduler_sections(
         lines.extend(
             [
                 "",
-                "RunPod Work",
+                "RunPod GPU Work",
                 _render_table(
                     ["GPU", "Work", "Run", "Util %", "Mem (MB)"],
                     gpu_rows,

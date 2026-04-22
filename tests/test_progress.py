@@ -173,10 +173,10 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Active Evaluations" in report
     assert "86/2000" in report
     assert "1h 0m" in report
-    assert "Training Queue" in report
-    assert "RunPod Scheduler" in report
-    assert "RunPod Work" in report
-    assert "RunPod Eval Queue" in report
+    assert "Training Runs" in report
+    assert "RunPod Scheduler Status" in report
+    assert "RunPod GPU Work" in report
+    assert "Post-Train Eval Queue" in report
     assert "Artifact sync" in report
     assert "disabled-basic-ssh" in report
     assert "best-assumed-full" in report
@@ -199,11 +199,13 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     training_report = render_training_report(summary)
 
     assert "TextVQA Training Progress" in training_report
-    assert "Summary" in training_report
-    assert "All Runs" in training_report
-    assert "RunPod Scheduler" in training_report
-    assert "RunPod Work" in training_report
-    assert "RunPod Eval Queue" in training_report
+    assert "Training Overview" in training_report
+    assert "Training Runs" in training_report
+    assert "RunPod Scheduler Status" in training_report
+    assert "RunPod GPU Work" in training_report
+    assert "Post-Train Eval Queue" in training_report
+    assert "Active training GPUs" in training_report
+    assert "GPU" in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "Loss" in training_report
     assert "Grad" in training_report
@@ -531,7 +533,7 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
 
     training_report = render_training_report(summary)
 
-    assert "RunPod Eval Queue" in training_report
+    assert "Post-Train Eval Queue" in training_report
     assert "running" in training_report
     assert "pending" in training_report
     assert "core_all_linear_r16_seed07" in training_report
@@ -656,7 +658,7 @@ def test_render_training_report_treats_starting_workers_as_running_stage() -> No
 
     training_report = render_training_report(summary)
 
-    assert "Summary" in training_report
+    assert "Training Overview" in training_report
     assert "blocked until finalist selection completes" not in training_report
     assert "Active Runs" not in training_report
     assert "core_all_linear_r16_seed07" in training_report
