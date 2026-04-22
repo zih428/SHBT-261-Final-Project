@@ -5,6 +5,7 @@ from pathlib import Path
 
 from textvqa_proj.config import Settings
 from textvqa_proj.data.dataset import TextVQASample, write_manifest
+from textvqa_proj.cli import build_parser
 
 
 def test_cli_validate_and_evaluate(tmp_path: Path) -> None:
@@ -125,3 +126,25 @@ def test_cli_evaluate_trained_adapter(tmp_path: Path) -> None:
     )
 
     assert "accuracy" in evaluate.stdout
+
+
+def test_cli_parser_accepts_judge_command() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "judge-evaluate-run",
+            "--run-root",
+            "outputs/example",
+            "--model",
+            "gpt-4.1-mini",
+            "--batch-size",
+            "10",
+            "--concurrency",
+            "2",
+        ]
+    )
+    assert args.command == "judge-evaluate-run"
+    assert args.run_root == "outputs/example"
+    assert args.model == "gpt-4.1-mini"
+    assert args.batch_size == 10
+    assert args.concurrency == 2

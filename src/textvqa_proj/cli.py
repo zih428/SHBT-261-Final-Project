@@ -9,6 +9,12 @@ from textvqa_proj.data.prepare import (
     materialize_external_ocr_manifest,
     materialize_internal_dev_split,
 )
+from textvqa_proj.eval.judge_runner import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_JUDGE_MODEL,
+    run_judge_evaluation,
+)
 from textvqa_proj.inference.runner import ExperimentRunner, load_samples_for_settings
 from textvqa_proj.models.registry import create_adapter
 from textvqa_proj.training.post_eval import evaluate_trained_adapter
@@ -94,6 +100,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable resumable evaluation for this trained-adapter run.",
     )
 
+    judge_evaluate = subparsers.add_parser(
+        "judge-evaluate-run",
+        help="Run LLM-as-a-Judge over an existing predictions.jsonl artifact.",
+    )
+    judge_evaluate.add_argument("--run-root", required=True)
+    judge_evaluate.add_argument("--model", default=DEFAULT_JUDGE_MODEL)
+    judge_evaluate.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    judge_evaluate.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    judge_evaluate.add_argument("--max-examples", type=int, default=None)
+    judge_evaluate.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable resumable judge evaluation.",
+    )
+
     train = subparsers.add_parser("train", help="Run LoRA fine-tuning for supported backbones.")
     add_config_args(train)
     train.add_argument(
@@ -122,6 +143,18 @@ def main() -> None:
             output_root=args.output_root,
             limit=args.limit,
             run_name=args.run_name,
+            resume=not args.no_resume,
+        )
+        print(metrics)
+        return
+
+    if args.command == "judge-evaluate-run":
+        metrics = run_judge_evaluation(
+            Path(args.run_root),
+            judge_model=args.model,
+            batch_size=args.batch_size,
+            concurrency=args.concurrency,
+            max_examples=args.max_examples,
             resume=not args.no_resume,
         )
         print(metrics)

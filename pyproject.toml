@@ -13,7 +13,9 @@ authors = [
   {name = "Zih Hu"},
 ]
 dependencies = [
+  "httpx>=0.28.1",
   "pillow>=11.1.0",
+  "tqdm>=4.67.1",
   "typing-extensions>=4.12.2; python_version < '3.13'",
 ]
 

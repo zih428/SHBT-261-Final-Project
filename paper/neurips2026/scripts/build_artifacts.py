@@ -265,6 +265,17 @@ def maybe_compute_meteor(predictions_path: Path) -> float | None:
     return mean(scores) if scores else None
 
 
+def maybe_load_judge_similarity(run_root: Path) -> float | None:
+    metrics_path = run_root / "judge_metrics.json"
+    if not metrics_path.exists():
+        return None
+    metrics = load_json(metrics_path)
+    value = metrics.get("judge_similarity")
+    if isinstance(value, (float, int)):
+        return float(value)
+    return None
+
+
 def percentage(value: float | None) -> str:
     return "--" if value is None else f"{100 * value:.2f}"
 
@@ -557,6 +568,7 @@ def build_tables(
                 "setting": row.prompt.replace("_", " "),
                 "split": row.split,
                 "accuracy": row.metrics["accuracy"],
+                "judge": maybe_load_judge_similarity(row.path),
                 "consensus_accuracy": row.metrics["consensus_accuracy"],
                 "f1": row.metrics["f1"],
                 "bleu": row.metrics["bleu"],
@@ -573,6 +585,7 @@ def build_tables(
                 "setting": row.prompt.replace("_", " "),
                 "split": row.split,
                 "accuracy": row.metrics["accuracy"],
+                "judge": maybe_load_judge_similarity(row.path),
                 "consensus_accuracy": row.metrics["consensus_accuracy"],
                 "f1": row.metrics["f1"],
                 "bleu": row.metrics["bleu"],
@@ -587,6 +600,7 @@ def build_tables(
             "setting": "all-linear r16 seed13",
             "split": "validation",
             "accuracy": tuned_val["metrics"]["accuracy"],
+            "judge": maybe_load_judge_similarity(tuned_val["path"]),
             "consensus_accuracy": tuned_val["metrics"]["consensus_accuracy"],
             "f1": tuned_val["metrics"]["f1"],
             "bleu": tuned_val["metrics"]["bleu"],
@@ -597,20 +611,30 @@ def build_tables(
     write_csv(
         DATA_DIR / "main_results.csv",
         main_rows,
-        ["stage", "model", "setting", "split", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
+        ["stage", "model", "setting", "split", "accuracy", "judge", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
     )
 
     with (TABLES_DIR / "main_results_table.tex").open("w") as fh:
-        fh.write("\\begin{tabular}{llcccccc}\n")
+        include_judge = any(row["judge"] is not None for row in main_rows)
+        fh.write("\\begin{tabular}{" + ("llccccccc" if include_judge else "llcccccc") + "}\n")
         fh.write("\\toprule\n")
-        fh.write("Stage & Model / setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
+        if include_judge:
+            fh.write("Stage & Model / setting & Acc. & Judge & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
+        else:
+            fh.write("Stage & Model / setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
         fh.write("\\midrule\n")
         for row in main_rows:
             label = f"{row['model']} ({row['setting']})"
-            fh.write(
-                f"{row['stage']} & {label} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
-                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
-            )
+            if include_judge:
+                fh.write(
+                    f"{row['stage']} & {label} & {percentage(row['accuracy'])} & {percentage(row['judge'])} & {percentage(row['consensus_accuracy'])} & "
+                    f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                )
+            else:
+                fh.write(
+                    f"{row['stage']} & {label} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
+                    f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
 
@@ -623,6 +647,7 @@ def build_tables(
                 "configuration": trained_label(row["slug"]),
                 "eval_loss": row["eval_loss"],
                 "accuracy": row["metrics"]["accuracy"],
+                "judge": maybe_load_judge_similarity(row["path"]),
                 "consensus_accuracy": row["metrics"]["consensus_accuracy"],
                 "f1": row["metrics"]["f1"],
                 "bleu": row["metrics"]["bleu"],
@@ -633,18 +658,28 @@ def build_tables(
     write_csv(
         DATA_DIR / "trained_adapter_results.csv",
         trained_rows_csv,
-        ["group", "configuration", "eval_loss", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
+        ["group", "configuration", "eval_loss", "accuracy", "judge", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
     )
     with (TABLES_DIR / "trained_adapter_table.tex").open("w") as fh:
-        fh.write("\\begin{tabular}{llcccccc}\n")
+        include_judge = any(row["judge"] is not None for row in trained_rows_csv)
+        fh.write("\\begin{tabular}{" + ("llccccccc" if include_judge else "llcccccc") + "}\n")
         fh.write("\\toprule\n")
-        fh.write("Group & Configuration & Eval loss & Acc. & Cons. & F1 & METEOR & ROUGE-L\\\\\n")
+        if include_judge:
+            fh.write("Group & Configuration & Eval loss & Acc. & Judge & Cons. & F1 & METEOR & ROUGE-L\\\\\n")
+        else:
+            fh.write("Group & Configuration & Eval loss & Acc. & Cons. & F1 & METEOR & ROUGE-L\\\\\n")
         fh.write("\\midrule\n")
         for row in trained_rows_csv:
-            fh.write(
-                f"{row['group']} & {row['configuration']} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & "
-                f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
-            )
+            if include_judge:
+                fh.write(
+                    f"{row['group']} & {row['configuration']} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & {percentage(row['judge'])} & "
+                    f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                )
+            else:
+                fh.write(
+                    f"{row['group']} & {row['configuration']} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & "
+                    f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
 
@@ -655,6 +690,7 @@ def build_tables(
                 "branch": "Prompt study" if row.stage == "appendix-prompt" else "Stress test",
                 "setting": row.prompt.replace("_", " "),
                 "accuracy": row.metrics["accuracy"],
+                "judge": maybe_load_judge_similarity(row.path),
                 "consensus_accuracy": row.metrics["consensus_accuracy"],
                 "f1": row.metrics["f1"],
                 "bleu": row.metrics["bleu"],
@@ -665,18 +701,28 @@ def build_tables(
     write_csv(
         DATA_DIR / "appendix_results.csv",
         appendix_rows_csv,
-        ["branch", "setting", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
+        ["branch", "setting", "accuracy", "judge", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
     )
     with (TABLES_DIR / "appendix_results_table.tex").open("w") as fh:
-        fh.write("\\begin{tabular}{llcccccc}\n")
+        include_judge = any(row["judge"] is not None for row in appendix_rows_csv)
+        fh.write("\\begin{tabular}{" + ("llccccccc" if include_judge else "llcccccc") + "}\n")
         fh.write("\\toprule\n")
-        fh.write("Branch & Setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
+        if include_judge:
+            fh.write("Branch & Setting & Acc. & Judge & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
+        else:
+            fh.write("Branch & Setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
         fh.write("\\midrule\n")
         for row in appendix_rows_csv:
-            fh.write(
-                f"{row['branch']} & {row['setting']} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
-                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
-            )
+            if include_judge:
+                fh.write(
+                    f"{row['branch']} & {row['setting']} & {percentage(row['accuracy'])} & {percentage(row['judge'])} & {percentage(row['consensus_accuracy'])} & "
+                    f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                )
+            else:
+                fh.write(
+                    f"{row['branch']} & {row['setting']} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
+                    f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
 
