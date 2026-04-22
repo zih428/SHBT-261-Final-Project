@@ -92,6 +92,18 @@ def test_render_progress_report_mentions_stage_counts() -> None:
                 "sync_mode": "disabled-basic-ssh",
                 "sync_message": "Artifact sync requires full SSH over exposed TCP.",
                 "synced_paths": ["outputs/training"],
+                "eval_runs": [
+                    {
+                        "config_name": "core_all_linear_r16_seed07",
+                        "split": "internal_dev",
+                        "status": "running",
+                        "processed_count": 100,
+                        "total_count": 2000,
+                        "started_at": "2026-04-21T22:45:00+00:00",
+                        "updated_at": "2026-04-21T23:15:00+00:00",
+                        "resumed_from_count": 0,
+                    }
+                ],
                 "plan": {
                     "post_train_eval_ready": True,
                     "first_eleven_completed": True,
@@ -171,6 +183,7 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "internal_dev" in report
     assert "Eval queue" in report
     assert "1 running, 1 pending" in report
+    assert "100/2000" in report
     assert "128/1024" in report
     assert "Loss" in report
     assert "Grad" in report
@@ -465,6 +478,18 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
                     "outputs/training",
                     "outputs/logs/training_matrix",
                 ],
+                "eval_runs": [
+                    {
+                        "config_name": "core_all_linear_r16_seed07",
+                        "split": "internal_dev",
+                        "status": "running",
+                        "processed_count": 100,
+                        "total_count": 2000,
+                        "started_at": "2026-04-22T08:25:06+00:00",
+                        "updated_at": "2026-04-22T08:30:06+00:00",
+                        "resumed_from_count": 0,
+                    }
+                ],
                 "plan": {
                     "post_train_eval_ready": True,
                     "first_eleven_completed": True,
@@ -512,6 +537,8 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
     assert "core_all_linear_r16_seed07" in training_report
     assert "core_all_linear_r16_seed13" in training_report
     assert "1 running, 2 pending" in training_report
+    assert "100/2000" in training_report
+    assert "now" in training_report
 
 
 def test_render_training_report_prefers_live_eval_queue_over_stale_scheduler_snapshot() -> None:
@@ -560,6 +587,18 @@ def test_render_training_report_prefers_live_eval_queue_over_stale_scheduler_sna
                 "synced_paths": [
                     "outputs/training",
                     "outputs/logs/training_matrix",
+                ],
+                "eval_runs": [
+                    {
+                        "config_name": "core_all_linear_r16_seed07",
+                        "split": "internal_dev",
+                        "status": "running",
+                        "processed_count": 100,
+                        "total_count": 2000,
+                        "started_at": "2026-04-22T08:25:06+00:00",
+                        "updated_at": "2026-04-22T08:30:06+00:00",
+                        "resumed_from_count": 0,
+                    }
                 ],
                 "plan": {
                     "post_train_eval_ready": True,

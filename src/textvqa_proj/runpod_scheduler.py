@@ -556,6 +556,10 @@ if eval_root.exists():
                 "config_name": config_name,
                 "split": settings.get("experiment", {{}}).get("split"),
                 "status": progress.get("status"),
+                "processed_count": progress.get("processed_count"),
+                "total_count": progress.get("total_count"),
+                "started_at": progress.get("started_at"),
+                "resumed_from_count": progress.get("resumed_from_count"),
                 "updated_at": progress.get("updated_at"),
                 "accuracy": metrics.get("accuracy"),
             }}

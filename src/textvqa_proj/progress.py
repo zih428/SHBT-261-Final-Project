@@ -209,6 +209,209 @@ def _latest_grad_norm_cell(run: dict[str, Any]) -> str:
     return _format_metric_value(latest_log.get("grad_norm"))
 
 
+def _eval_progress_cell(run: dict[str, Any]) -> str:
+    processed = run.get("processed_count")
+    total = run.get("total_count")
+    if processed is not None and total is not None:
+        return f"{processed}/{total}"
+    if processed is not None:
+        return str(processed)
+    return "-"
+
+
+def _estimate_completion_time(
+    *,
+    started_at: str | None,
+    updated_at: str | None,
+    processed_count: int | None,
+    total_count: int | None,
+    resumed_from_count: int | None = None,
+) -> datetime | None:
+    if processed_count is None or total_count is None:
+        return None
+    eta_at = _format_eta(
+        started_at=started_at,
+        updated_at=updated_at,
+        current_step=processed_count,
+        max_steps=total_count,
+        resumed_from_step=resumed_from_count,
+    )
+    return _parse_iso(eta_at)
+
+
+def _eval_duration_seconds(run: dict[str, Any]) -> float | None:
+    started = _parse_iso(run.get("started_at"))
+    updated = _parse_iso(run.get("updated_at"))
+    if started is None or updated is None:
+        return None
+    duration = (updated - started).total_seconds()
+    return duration if duration > 0 else None
+
+
+def _eval_queue_rows(
+    scheduler: dict[str, Any],
+    *,
+    live_gpu_tasks: list[dict[str, Any]] | None = None,
+) -> list[list[str]]:
+    plan = scheduler.get("plan", {})
+    eval_runs = {
+        (str(run.get("config_name")), str(run.get("split"))): run
+        for run in (scheduler.get("eval_runs") or [])
+        if isinstance(run, dict) and run.get("config_name") and run.get("split")
+    }
+
+    active_evals = [
+        item for item in (plan.get("active_evals") or []) if isinstance(item, dict)
+    ]
+    if live_gpu_tasks is not None:
+        live_active_evals: list[dict[str, Any]] = []
+        for gpu in live_gpu_tasks:
+            if not isinstance(gpu, dict) or gpu.get("assignment_kind") != "eval":
+                continue
+            label = str(gpu.get("assignment_label") or "")
+            split = "-"
+            config_name = label
+            if label.endswith(")") and " (" in label:
+                config_name, split = label[:-1].rsplit(" (", maxsplit=1)
+            live_active_evals.append(
+                {
+                    "config_name": config_name,
+                    "split": split,
+                    "gpu_id": str(gpu.get("gpu_id") or "-"),
+                    "status": "running",
+                }
+            )
+        active_evals = live_active_evals
+
+    pending_internal = [str(item) for item in (plan.get("pending_internal_dev_evals") or [])]
+    pending_validation = [str(item) for item in (plan.get("pending_validation_evals") or [])]
+
+    gpus = live_gpu_tasks or plan.get("gpus") or scheduler.get("gpus") or []
+    now = _current_utc()
+
+    default_duration_by_split = {
+        "internal_dev": 40 * 60.0,
+        "validation": 105 * 60.0,
+    }
+    completed_duration_by_split: dict[str, list[float]] = {}
+    for run in eval_runs.values():
+        if run.get("status") != "completed":
+            continue
+        split = str(run.get("split") or "")
+        duration = _eval_duration_seconds(run)
+        if not split or duration is None:
+            continue
+        completed_duration_by_split.setdefault(split, []).append(duration)
+
+    def estimated_duration_seconds(split: str) -> float:
+        durations = completed_duration_by_split.get(split) or []
+        if durations:
+            return sum(durations) / len(durations)
+        for active in active_evals:
+            if str(active.get("split")) != split:
+                continue
+            run = eval_runs.get((str(active.get("config_name")), split), {})
+            estimated_end = _estimate_completion_time(
+                started_at=run.get("started_at"),
+                updated_at=run.get("updated_at"),
+                processed_count=run.get("processed_count"),
+                total_count=run.get("total_count"),
+                resumed_from_count=run.get("resumed_from_count"),
+            )
+            started = _parse_iso(run.get("started_at"))
+            if started is not None and estimated_end is not None and estimated_end > started:
+                return (estimated_end - started).total_seconds()
+        return default_duration_by_split.get(split, 40 * 60.0)
+
+    slot_available_at: list[datetime] = []
+    for gpu in gpus:
+        if not isinstance(gpu, dict):
+            continue
+        assignment_kind = str(gpu.get("assignment_kind") or "")
+        if assignment_kind == "training":
+            continue
+        if assignment_kind == "eval":
+            label = str(gpu.get("assignment_label") or "")
+            split = "-"
+            config_name = label
+            if label.endswith(")") and " (" in label:
+                config_name, split = label[:-1].rsplit(" (", maxsplit=1)
+            run = eval_runs.get((config_name, split), {})
+            estimated_end = _estimate_completion_time(
+                started_at=run.get("started_at"),
+                updated_at=run.get("updated_at"),
+                processed_count=run.get("processed_count"),
+                total_count=run.get("total_count"),
+                resumed_from_count=run.get("resumed_from_count"),
+            )
+            slot_available_at.append(estimated_end or now)
+            continue
+        slot_available_at.append(now)
+    if not slot_available_at and active_evals:
+        for active in active_evals:
+            run = eval_runs.get((str(active.get("config_name")), str(active.get("split"))), {})
+            estimated_end = _estimate_completion_time(
+                started_at=run.get("started_at"),
+                updated_at=run.get("updated_at"),
+                processed_count=run.get("processed_count"),
+                total_count=run.get("total_count"),
+                resumed_from_count=run.get("resumed_from_count"),
+            )
+            slot_available_at.append(estimated_end or now)
+
+    rows: list[list[str]] = []
+    for active in active_evals:
+        config_name = str(active.get("config_name") or "-")
+        split = str(active.get("split") or "-")
+        run = eval_runs.get((config_name, split), {})
+        eta_at = _format_eta(
+            started_at=run.get("started_at"),
+            updated_at=run.get("updated_at"),
+            current_step=run.get("processed_count"),
+            max_steps=run.get("total_count"),
+            resumed_from_step=run.get("resumed_from_count"),
+        )
+        rows.append(
+            [
+                "running",
+                str(active.get("gpu_id") or "-"),
+                _ellipsize(config_name, 28),
+                split,
+                _eval_progress_cell(run),
+                _format_eta_duration(updated_at=run.get("updated_at"), eta_at=eta_at) or "-",
+                "now",
+                _format_short_eastern_cell(eta_at) or "-",
+            ]
+        )
+
+    pending_items = [(config_name, "internal_dev") for config_name in pending_internal]
+    pending_items.extend((config_name, "validation") for config_name in pending_validation)
+    for config_name, split in pending_items:
+        if slot_available_at:
+            slot_index = min(range(len(slot_available_at)), key=lambda index: slot_available_at[index])
+            projected_start = slot_available_at[slot_index]
+        else:
+            slot_index = None
+            projected_start = now
+        duration_seconds = estimated_duration_seconds(split)
+        projected_end = projected_start + timedelta(seconds=duration_seconds)
+        if slot_index is not None:
+            slot_available_at[slot_index] = projected_end
+        rows.append(
+            [
+                "pending",
+                "-",
+                _ellipsize(config_name, 28),
+                split,
+                "-",
+                "-",
+                _format_short_eastern_cell(projected_start.isoformat()) or "-",
+                _format_short_eastern_cell(projected_end.isoformat()) or "-",
+            ]
+        )
+    return rows
+
+
 def _latest_scheduler_state(repo_root: Path) -> dict[str, Any] | None:
     return _read_json(repo_root / STATE_RELATIVE_PATH)
 
@@ -1236,38 +1439,10 @@ def _render_scheduler_sections(
     live_gpu_tasks: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     plan = scheduler.get("plan", {})
-    snapshot_active_evals = [
-        item for item in (plan.get("active_evals") or []) if isinstance(item, dict)
-    ]
-    active_evals = snapshot_active_evals
-    if live_gpu_tasks is not None:
-        live_active_evals: list[dict[str, Any]] = []
-        for gpu in live_gpu_tasks:
-            if not isinstance(gpu, dict) or gpu.get("assignment_kind") != "eval":
-                continue
-            label = str(gpu.get("assignment_label") or "")
-            split = "-"
-            config_name = label
-            if label.endswith(")") and " (" in label:
-                config_name, split = label[:-1].rsplit(" (", maxsplit=1)
-            live_active_evals.append(
-                {
-                    "config_name": config_name,
-                    "split": split,
-                    "gpu_id": str(gpu.get("gpu_id") or "-"),
-                    "status": "running",
-                }
-            )
-        active_evals = live_active_evals
-    pending_internal = [str(item) for item in (plan.get("pending_internal_dev_evals") or [])]
-    pending_validation = [str(item) for item in (plan.get("pending_validation_evals") or [])]
-    pending_total = len(pending_internal) + len(pending_validation)
-    eval_queue_summary = f"{len(active_evals)} running, {pending_total} pending"
-    next_eval = "-"
-    if pending_internal:
-        next_eval = f"{pending_internal[0]} internal_dev"
-    elif pending_validation:
-        next_eval = f"{pending_validation[0]} validation"
+    eval_rows = _eval_queue_rows(scheduler, live_gpu_tasks=live_gpu_tasks)
+    running_eval_count = sum(1 for row in eval_rows if row[0] == "running")
+    pending_eval_count = sum(1 for row in eval_rows if row[0] == "pending")
+    eval_queue_summary = f"{running_eval_count} running, {pending_eval_count} pending"
 
     scheduler_rows = [
         ["Last poll", _format_short_eastern_cell(scheduler.get("polled_at")) or "-"],
@@ -1281,7 +1456,6 @@ def _render_scheduler_sections(
             "yes" if plan.get("first_eleven_completed") else "no",
         ],
         ["Eval queue", eval_queue_summary],
-        ["Next eval", next_eval],
         [
             "Next validation candidate",
             str(plan.get("validation_candidate") or "-"),
@@ -1306,6 +1480,18 @@ def _render_scheduler_sections(
         "RunPod Scheduler",
         _render_table(["Item", "Value"], scheduler_rows),
     ]
+
+    if eval_rows:
+        lines.extend(
+            [
+                "",
+                "RunPod Eval Queue",
+                _render_table(
+                    ["Status", "GPU", "Run", "Split", "Progress", "ETA", "Projected Start (ET)", "Projected End (ET)"],
+                    eval_rows,
+                ),
+            ]
+        )
 
     gpus = live_gpu_tasks or plan.get("gpus") or scheduler.get("gpus") or []
     gpu_rows = [
@@ -1335,31 +1521,6 @@ def _render_scheduler_sections(
             ]
         )
 
-    eval_rows = []
-    for item in active_evals:
-        eval_rows.append(
-            [
-                "running",
-                str(item.get("gpu_id") or "-"),
-                _ellipsize(str(item.get("config_name") or "-"), 34),
-                str(item.get("split") or "-"),
-            ]
-        )
-    for config_name in pending_internal:
-        eval_rows.append(["pending", "-", _ellipsize(config_name, 34), "internal_dev"])
-    for config_name in pending_validation:
-        eval_rows.append(["pending", "-", _ellipsize(config_name, 34), "validation"])
-    if eval_rows:
-        lines.extend(
-            [
-                "",
-                "RunPod Eval Queue",
-                _render_table(
-                    ["Status", "GPU", "Run", "Split"],
-                    eval_rows,
-                ),
-            ]
-        )
     return lines
 
 
