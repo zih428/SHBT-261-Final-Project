@@ -1,0 +1,50 @@
+\section{Study Design and Experimental Protocol}
+\label{sec:design}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/textvqa_experiment_pipeline.png}
+    \caption{End-to-end experiment pipeline for the current TextVQA study. The protocol follows a staged funnel: stratified internal-dev screening, finalist reruns on the official validation split, backbone selection for LoRA fine-tuning, an $8$-run core Qwen LoRA matrix, and $4$ winner-conditioned follow-up training runs. Training follow-ups are chosen by mean internal-dev \texttt{eval\_loss} across core seeds, whereas completed trained adapters are later ranked by internal-dev accuracy before promoting only the final tuned model, or a very small shortlist, to validation. Appendix robustness runs remain a secondary validation branch that supports the final analysis without altering the main winner-selection funnel.}
+    \label{fig:pipeline}
+\end{figure*}
+
+\subsection{Task and data protocol}
+
+The study follows the official TextVQA split structure of approximately $34.6$k training examples, $5$k validation examples, and $5.73$k test examples \citep{singh2019textvqa}. We reserve the official validation split for finalist reruns, appendix experiments, and final tuned-model checks. To avoid exhausting this split during exploratory screening, we materialize a separate $2{,}000$-example internal development set from the training split. This internal-dev set is stratified rather than sampled naively, with explicit control over question prefix, answer-length bucket, and OCR-token-count bucket. The remaining training examples form the training pool for the LoRA study.
+
+This split policy serves two methodological goals. First, it allows broad model and prompt exploration without implicitly overfitting the official validation set. Second, it makes the final validation comparisons more meaningful, because they are reserved for a shortlist that has already survived a cheaper but structured screening stage. The protocol therefore trades a small amount of up-front split engineering for a much cleaner evaluation narrative.
+
+\subsection{Model pool and prompt settings}
+
+The canonical zero-shot benchmark pool contains four open-source VLM families and one non-neural OCR lexical baseline. The four reportable VLM families are Qwen2.5-VL-3B, InternVL2.5-4B, LLaVA-Phi-3-mini, and BLIP-2 OPT-2.7B. The OCR lexical baseline is included not as a competitor to modern VLMs, but as a calibration point that helps distinguish genuine multimodal reasoning from question-answer overlap driven by visible text alone.
+
+Each real VLM is screened under six prompt settings:
+\begin{enumerate}[leftmargin=1.5em, itemsep=0.2em]
+    \item \texttt{plain},
+    \item \texttt{short\_answer},
+    \item \texttt{ocr\_copy\_first},
+    \item \texttt{ocr\_injected},
+    \item \texttt{ocr\_injected\_normalized},
+    \item \texttt{ocr\_fused}.
+\end{enumerate}
+This yields $24$ real VLM screening runs ($4$ backbones $\times$ $6$ settings) plus $6$ OCR-baseline runs. The design deliberately treats OCR prompting as a first-class variable, because TextVQA performance is often determined as much by how text is exposed to the model as by which backbone is chosen.
+
+\subsection{Funnel evaluation protocol}
+
+The first evaluation stage performs broad screening on the internal-dev split. Its purpose is not to produce final leaderboard claims, but to estimate which backbone--prompt combinations are competitive enough to deserve the more expensive validation budget. From this stage, we promote the top two backbones and the top four settings for each, producing eight finalist reruns on the official validation split. A separate appendix branch contains eight additional prompt and stress-test evaluations that are intended to strengthen the analysis section rather than alter the main winner-selection logic.
+
+This funnel design is central to the paper's methodology. It prevents the study from becoming either too small to be informative or too loose to be interpretable. In particular, it allows prompt sensitivity to be measured early, but avoids the common mistake of reporting many exploratory validation runs as if they carried the same evidentiary weight as a small finalist set. The backbone selected for fine-tuning is therefore not the winner of a single flat leaderboard, but the survivor of a staged promotion policy.
+
+\subsection{Winner-conditioned LoRA training study}
+
+The adaptation path in this project is LoRA fine-tuning on Qwen2.5-VL-3B. The training study has twelve runs in total. The core matrix contains eight runs spanning two target-module strategies, two ranks, and two random seeds. Concretely, it compares attention-only versus all-linear target sets and rank $16$ versus $32$, with seed replication to estimate whether observed differences are stable or fragile.
+
+The remaining four runs are follow-ups conditioned on the completed core matrix rather than fixed in advance to an arbitrary default family. The first pair is an OCR-conditioning ablation that toggles OCR on and off while holding the selected LoRA family fixed. The second pair is a data-scaling comparison between a smaller fixed-budget subset and the full training-remainder pool. Training-stage winner selection is based on mean internal-dev \texttt{eval\_loss} across both seeds within a family, with the best-seed run used as the representative configuration for writing the winner-conditioned override. Post-training model promotion is handled separately: once trained adapters are evaluated on internal-dev for answer accuracy, only the final tuned winner, or a very small shortlist, is promoted to official validation.
+
+This separation between training-stage family selection and post-training accuracy-based promotion is intentional. The former is a control mechanism for deciding which family should receive follow-up training budget, while the latter is the paper-facing decision rule for selecting the tuned model that deserves final validation evidence. Keeping these roles distinct makes the adaptation study easier to defend and prevents the follow-up phase from being attached to a family that won only by default.
+
+\subsection{Metrics, systems boundary, and reproducibility}
+
+The headline metric is exact-match TextVQA accuracy. In addition, the full evaluation pipeline is instrumented to report secondary semantic metrics required by the course project, including BLEU, METEOR, ROUGE, and LLM-as-a-Judge similarity. These metrics do not replace exact-match accuracy, which remains the primary paper-facing score, but they are useful for understanding whether near-miss generations or paraphrastic answers carry signal that exact string matching discards.
+
+The implementation boundary is equally deliberate. All canonical zero-shot, finalist, and appendix evaluations are executed locally on a single Apple-Silicon workstation with resumable queueing and append-only logs. Only the final LoRA matrix is rerun on remote H100 GPUs, and it is rerun from scratch under a distinct run namespace rather than mixed with earlier local pilot training attempts. This preserves a clean hardware and checkpoint boundary between evaluation evidence and training evidence. Reproducibility is further supported through layered TOML configuration, materialized manifests, resumable training checkpoints, automated progress reporting, and remote multi-GPU orchestration with explicit phase boundaries. The result is an experiment that is not only ambitious in scope, but also inspectable in its operational details.

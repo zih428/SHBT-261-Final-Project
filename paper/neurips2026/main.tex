@@ -1,0 +1,41 @@
+\documentclass{article}
+
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{amsmath}
+
+\title{Benchmarking and Adapting Open-Source Vision-Language Models for TextVQA: A Funnel Evaluation and LoRA Fine-Tuning Study}
+
+\author{%
+  Chenxi Ge
+  \And
+  Harry Hu
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+TextVQA requires a model to read scene text, ground it in visual context, and answer natural-language questions with high exact-match precision. Although open-source vision-language models (VLMs) have improved rapidly, rigorous TextVQA studies still face a practical tension between benchmark breadth, adaptation depth, and limited compute. We address this problem with a staged empirical protocol that combines broad zero-shot screening, disciplined finalist reruns, and winner-conditioned LoRA fine-tuning within a single reproducible pipeline. The study benchmarks four open-source VLM families and an OCR lexical baseline, uses a stratified internal development split to preserve the official validation set for serious comparisons, and separates training-stage family selection from post-training accuracy-based model promotion. The resulting design is deliberately structured to produce interpretable model comparisons, defensible adaptation decisions, and reproducible evidence under a realistic compute budget while retaining enough experimental breadth to support a substantive analysis of OCR usage, prompt sensitivity, and parameter-efficient adaptation.
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/study_design}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
