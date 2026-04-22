@@ -5,6 +5,7 @@ from pathlib import Path
 
 from textvqa_proj.runpod_scheduler import (
     STATE_RELATIVE_PATH,
+    _write_remote_state,
     build_scheduler_plan,
     run_scheduler_cycle,
     sync_results,
@@ -300,3 +301,33 @@ def test_run_scheduler_cycle_refreshes_snapshot_after_launch_action(
     ]
     written_state = json.loads((tmp_path / STATE_RELATIVE_PATH).read_text())
     assert written_state["plan"]["active_evals"][0]["config_name"] == "core_all_linear_r16_seed07"
+
+
+def test_write_remote_state_streams_payload_over_stdin(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr("textvqa_proj.runpod_scheduler.subprocess.run", fake_run)
+
+    _write_remote_state(
+        tmp_path / "runpod_ssh.sh",
+        {"big": "x" * 100_000},
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["command"] == [str(tmp_path / "runpod_ssh.sh")]
+    assert "input" in calls[0]
+    assert "x" * 1000 in str(calls[0]["input"])
+    assert str(STATE_RELATIVE_PATH) in str(calls[0]["input"])

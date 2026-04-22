@@ -50,9 +50,16 @@ run_ssh() {
 }
 
 main() {
-  local -a command=("$@")
+  local -a command=()
+  if (($# > 0)); then
+    command=("$@")
+  fi
 
-  if run_ssh "$RUNPOD_HOST" "${command[@]}"; then
+  if ((${#command[@]} == 0)); then
+    if run_ssh "$RUNPOD_HOST"; then
+      return 0
+    fi
+  elif run_ssh "$RUNPOD_HOST" "${command[@]}"; then
     return 0
   fi
 
@@ -69,7 +76,11 @@ main() {
 
   local ip
   for ip in "${ips[@]}"; do
-    if run_ssh "$ip" "${command[@]}"; then
+    if ((${#command[@]} == 0)); then
+      if run_ssh "$ip"; then
+        return 0
+      fi
+    elif run_ssh "$ip" "${command[@]}"; then
       return 0
     fi
   done

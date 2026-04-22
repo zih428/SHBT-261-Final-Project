@@ -508,6 +508,16 @@ def _run_remote_lines(wrapper_path: Path, lines: list[str]) -> subprocess.Comple
     )
 
 
+def _run_remote_script(wrapper_path: Path, script: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(wrapper_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        input=script,
+    )
+
+
 def _remote_snapshot_script() -> str:
     return f"""
 import json
@@ -775,16 +785,17 @@ def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def _write_remote_state(wrapper_path: Path, payload: dict[str, Any]) -> None:
     json_payload = json.dumps(payload, indent=2, sort_keys=True, default=json_default)
-    _run_remote_lines(
-        wrapper_path,
+    script = "\n".join(
         [
             f"cd {shlex.quote(REMOTE_REPO_ROOT)}",
             f"mkdir -p {shlex.quote(str(STATE_RELATIVE_PATH.parent))}",
             f"cat > {shlex.quote(str(STATE_RELATIVE_PATH))} <<'EOF'",
             json_payload,
             "EOF",
-        ],
+            "exit",
+        ]
     )
+    _run_remote_script(wrapper_path, script)
 
 
 def _execute_action(
