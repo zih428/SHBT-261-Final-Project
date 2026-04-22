@@ -154,6 +154,42 @@ def _active_eval_task_keys(snapshot: dict[str, Any]) -> set[tuple[str, str]]:
     return task_keys
 
 
+def _active_eval_tasks(snapshot: dict[str, Any]) -> list[dict[str, str]]:
+    tasks: dict[tuple[str, str], dict[str, str]] = {}
+    for session_name in snapshot.get("tmux_sessions", []):
+        if not isinstance(session_name, str):
+            continue
+        parsed = _parse_eval_session_name(session_name)
+        if parsed is None:
+            continue
+        task_key = (parsed["config_name"], parsed["split"])
+        tasks[task_key] = {
+            "config_name": parsed["config_name"],
+            "split": parsed["split"],
+            "gpu_id": parsed["gpu_id"],
+            "status": "running",
+        }
+    for run in snapshot.get("eval_runs", []):
+        if not isinstance(run, dict) or run.get("status") != "running":
+            continue
+        config_name = run.get("config_name")
+        split = run.get("split")
+        if not isinstance(config_name, str) or not isinstance(split, str):
+            continue
+        task_key = (config_name, split)
+        existing = tasks.get(task_key, {})
+        tasks[task_key] = {
+            "config_name": config_name,
+            "split": split,
+            "gpu_id": str(existing.get("gpu_id") or run.get("gpu_id") or "-"),
+            "status": "running",
+        }
+    return [
+        tasks[key]
+        for key in sorted(tasks, key=lambda item: (item[1], item[0]))
+    ]
+
+
 def _completed_eval_task_keys(snapshot: dict[str, Any]) -> set[tuple[str, str]]:
     task_keys: set[tuple[str, str]] = set()
     for run in snapshot.get("eval_runs", []):
@@ -295,6 +331,7 @@ def _remote_training_root(snapshot: dict[str, Any], config_name: str) -> str | N
 def build_scheduler_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
     first_eleven_completed = _first_eleven_completed(snapshot)
     training_complete = _training_complete(snapshot)
+    active_evals = _active_eval_tasks(snapshot)
     internal_dev_queue = _internal_dev_eval_queue(snapshot)
     validation_queue = _validation_eval_queue(snapshot)
     post_train_eval_ready = first_eleven_completed
@@ -348,6 +385,7 @@ def build_scheduler_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
         "training_complete": training_complete,
         "post_train_eval_ready": post_train_eval_ready,
         "free_gpu_ids": free_gpu_ids,
+        "active_evals": active_evals,
         "pending_internal_dev_evals": internal_dev_queue,
         "pending_validation_evals": validation_queue,
         "actions": [asdict(action) for action in actions],
@@ -782,6 +820,8 @@ def run_scheduler_cycle(
             executed_actions.append(
                 _execute_action(snapshot, action, wrapper_path=wrapper_path)
             )
+        if executed_actions:
+            snapshot = query_remote_snapshot(repo_root, wrapper_path=wrapper_path)
         sync_state = sync_results(repo_root, snapshot)
     else:
         sync_state = {

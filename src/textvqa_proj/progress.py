@@ -1236,11 +1236,22 @@ def _render_scheduler_sections(
     live_gpu_tasks: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     plan = scheduler.get("plan", {})
+    active_evals = [
+        item for item in (plan.get("active_evals") or []) if isinstance(item, dict)
+    ]
+    pending_internal = [str(item) for item in (plan.get("pending_internal_dev_evals") or [])]
+    pending_validation = [str(item) for item in (plan.get("pending_validation_evals") or [])]
+    pending_total = len(pending_internal) + len(pending_validation)
+    eval_queue_summary = f"{len(active_evals)} running, {pending_total} pending"
+    next_eval = "-"
+    if pending_internal:
+        next_eval = f"{pending_internal[0]} internal_dev"
+    elif pending_validation:
+        next_eval = f"{pending_validation[0]} validation"
+
     scheduler_rows = [
         ["Last poll", _format_short_eastern_cell(scheduler.get("polled_at")) or "-"],
         ["Remote git HEAD", str(scheduler.get("remote_git_head") or "-")],
-        ["Artifact sync", str(scheduler.get("sync_mode") or "-")],
-        ["Sync status", str(scheduler.get("sync_message") or "-")],
         [
             "Post-train eval window",
             "yes" if plan.get("post_train_eval_ready") else "no",
@@ -1249,17 +1260,25 @@ def _render_scheduler_sections(
             "First 11 training runs done",
             "yes" if plan.get("first_eleven_completed") else "no",
         ],
-        [
-            "Pending internal-dev evals",
-            str(len(plan.get("pending_internal_dev_evals") or [])),
-        ],
-        [
-            "Pending validation evals",
-            str(len(plan.get("pending_validation_evals") or [])),
-        ],
+        ["Eval queue", eval_queue_summary],
+        ["Next eval", next_eval],
         [
             "Next validation candidate",
             str(plan.get("validation_candidate") or "-"),
+        ],
+        [
+            "Artifact sync",
+            _ellipsize(
+                (
+                    f"{scheduler.get('sync_mode') or '-'}"
+                    + (
+                        f" ({', '.join(str(path) for path in (scheduler.get('synced_paths') or []))})"
+                        if scheduler.get("synced_paths")
+                        else ""
+                    )
+                ),
+                80,
+            ),
         ],
     ]
     lines = [
@@ -1273,7 +1292,7 @@ def _render_scheduler_sections(
         [
             str(gpu.get("gpu_id", "-")),
             str(gpu.get("assignment_kind", "-")),
-            _ellipsize(str(gpu.get("assignment_label", "-")), 40),
+            _ellipsize(str(gpu.get("assignment_label", "-")), 34),
             str(gpu.get("utilization_gpu", "-")),
             (
                 "-"
@@ -1288,41 +1307,36 @@ def _render_scheduler_sections(
         lines.extend(
             [
                 "",
-                "RunPod GPU Tasks",
+                "RunPod Work",
                 _render_table(
-                    ["GPU", "Task", "Detail", "Util %", "Mem (MB)"],
+                    ["GPU", "Work", "Run", "Util %", "Mem (MB)"],
                     gpu_rows,
                 ),
             ]
         )
 
-    action_rows = [
-        [
-            str(action.get("kind", "-")),
-            str(action.get("gpu_id", "-")),
-            _ellipsize(str(action.get("label", "-")), 48),
-        ]
-        for action in plan.get("actions") or []
-        if isinstance(action, dict)
-    ]
-    if action_rows:
-        lines.extend(
+    eval_rows = []
+    for item in active_evals:
+        eval_rows.append(
             [
-                "",
-                "Scheduler Actions",
-                _render_table(["Kind", "GPU", "Label"], action_rows),
+                "running",
+                str(item.get("gpu_id") or "-"),
+                _ellipsize(str(item.get("config_name") or "-"), 34),
+                str(item.get("split") or "-"),
             ]
         )
-
-    synced_paths = scheduler.get("synced_paths") or []
-    if synced_paths:
+    for config_name in pending_internal:
+        eval_rows.append(["pending", "-", _ellipsize(config_name, 34), "internal_dev"])
+    for config_name in pending_validation:
+        eval_rows.append(["pending", "-", _ellipsize(config_name, 34), "validation"])
+    if eval_rows:
         lines.extend(
             [
                 "",
-                "Scheduler Sync",
+                "RunPod Eval Queue",
                 _render_table(
-                    ["Path"],
-                    [[str(path)] for path in synced_paths],
+                    ["Status", "GPU", "Run", "Split"],
+                    eval_rows,
                 ),
             ]
         )

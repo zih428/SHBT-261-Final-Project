@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from textvqa_proj.runpod_scheduler import build_scheduler_plan, sync_results
+from textvqa_proj.runpod_scheduler import (
+    STATE_RELATIVE_PATH,
+    build_scheduler_plan,
+    run_scheduler_cycle,
+    sync_results,
+)
 
 
 def _base_snapshot() -> dict[str, object]:
@@ -99,6 +105,14 @@ def test_scheduler_skips_internal_dev_tasks_already_running_or_completed() -> No
 
     plan = build_scheduler_plan(snapshot)
 
+    assert plan["active_evals"] == [
+        {
+            "config_name": "core_all_linear_r16_seed07",
+            "split": "internal_dev",
+            "gpu_id": "-",
+            "status": "running",
+        }
+    ]
     assert plan["actions"][0]["label"] == "core_all_linear_r32_seed07 internal_dev"
 
 
@@ -211,3 +225,78 @@ def test_sync_results_uses_snapshot_full_ssh_target_when_available(
         "outputs/logs/training_matrix",
     ]
     assert calls == [("216.243.220.223", "16291"), ("216.243.220.223", "16291")]
+
+
+def test_run_scheduler_cycle_refreshes_snapshot_after_launch_action(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    initial = _base_snapshot()
+    for run in initial["training"]["runs"]:
+        if run["config_name"] != "scale_best_assumed_full":
+            run["status"] = "completed"
+        else:
+            run["status"] = "running"
+    initial["active_training"] = [{"config_name": "scale_best_assumed_full", "gpu_id": "1"}]
+
+    refreshed = json.loads(json.dumps(initial))
+    refreshed["tmux_sessions"] = [
+        "posteval-gpu0__core_all_linear_r16_seed07__internal_dev"
+    ]
+
+    snapshots = [initial, refreshed]
+
+    def fake_query(repo_root, *, wrapper_path):
+        snapshot = snapshots.pop(0)
+        snapshot["plan"] = build_scheduler_plan(snapshot)
+        snapshot["polled_at"] = "2026-04-22T08:24:44+00:00"
+        snapshot["local_repo_root"] = str(repo_root)
+        return snapshot
+
+    monkeypatch.setattr("textvqa_proj.runpod_scheduler.query_remote_snapshot", fake_query)
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler._execute_action",
+        lambda snapshot, action, *, wrapper_path: {
+            "kind": action["kind"],
+            "label": action["label"],
+            "gpu_id": action.get("gpu_id"),
+            "executed_at": "2026-04-22T08:24:45+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler.sync_results",
+        lambda repo_root, snapshot: {
+            "synced_paths": [],
+            "sync_mode": "dry-test",
+            "sync_ready": True,
+            "sync_message": "ok",
+        },
+    )
+    monkeypatch.setattr(
+        "textvqa_proj.runpod_scheduler._write_remote_state",
+        lambda wrapper_path, payload: None,
+    )
+
+    state = run_scheduler_cycle(tmp_path, wrapper_path=tmp_path / "wrapper.sh")
+
+    assert state["plan"]["first_eleven_completed"] is True
+    assert state["plan"]["post_train_eval_ready"] is True
+    assert state["plan"]["active_evals"] == [
+        {
+            "config_name": "core_all_linear_r16_seed07",
+            "split": "internal_dev",
+            "gpu_id": "0",
+            "status": "running",
+        }
+    ]
+    assert state["plan"]["pending_internal_dev_evals"] == [
+        "core_all_linear_r16_seed13",
+        "core_all_linear_r32_seed07",
+        "core_all_linear_r32_seed13",
+        "core_attn_r16_seed07",
+        "core_attn_r16_seed13",
+        "core_attn_r32_seed07",
+        "core_attn_r32_seed13",
+    ]
+    written_state = json.loads((tmp_path / STATE_RELATIVE_PATH).read_text())
+    assert written_state["plan"]["active_evals"][0]["config_name"] == "core_all_linear_r16_seed07"

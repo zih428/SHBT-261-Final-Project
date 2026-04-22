@@ -95,6 +95,14 @@ def test_render_progress_report_mentions_stage_counts() -> None:
                 "plan": {
                     "post_train_eval_ready": True,
                     "first_eleven_completed": True,
+                    "active_evals": [
+                        {
+                            "config_name": "core_all_linear_r16_seed07",
+                            "split": "internal_dev",
+                            "gpu_id": "1",
+                            "status": "running",
+                        }
+                    ],
                     "pending_internal_dev_evals": ["core_all_linear_r32_seed07"],
                     "pending_validation_evals": [],
                     "validation_candidate": "core_all_linear_r16_seed07",
@@ -155,13 +163,14 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "1h 0m" in report
     assert "Training Queue" in report
     assert "RunPod Scheduler" in report
-    assert "RunPod GPU Tasks" in report
-    assert "Scheduler Actions" in report
-    assert "Scheduler Sync" in report
+    assert "RunPod Work" in report
+    assert "RunPod Eval Queue" in report
     assert "Artifact sync" in report
     assert "disabled-basic-ssh" in report
     assert "best-assumed-full" in report
     assert "internal_dev" in report
+    assert "Eval queue" in report
+    assert "1 running, 1 pending" in report
     assert "128/1024" in report
     assert "Loss" in report
     assert "Grad" in report
@@ -180,7 +189,8 @@ def test_render_progress_report_mentions_stage_counts() -> None:
     assert "Summary" in training_report
     assert "All Runs" in training_report
     assert "RunPod Scheduler" in training_report
-    assert "RunPod GPU Tasks" in training_report
+    assert "RunPod Work" in training_report
+    assert "RunPod Eval Queue" in training_report
     assert "core_all_linear_r16_seed07" in training_report
     assert "Loss" in training_report
     assert "Grad" in training_report
@@ -424,6 +434,84 @@ def test_render_training_report_prefers_live_gpu_tasks_when_present() -> None:
     assert "54" in training_report
     assert "27553/81559" in training_report
     assert "stale-seed13" not in training_report
+
+
+def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
+    summary = {
+        "training": {
+            "counts": {
+                "completed": 11,
+                "running": 1,
+                "pending": 0,
+                "failed": 0,
+                "other": 0,
+                "total": 12,
+            },
+            "status": "running",
+            "runs": [
+                {
+                    "config_name": "scale_best_assumed_full",
+                    "label": "qwen25_vl_3b x scale_best_assumed_full",
+                    "status": "running",
+                    "current_step": 1075,
+                    "max_steps": 4076,
+                }
+            ],
+            "scheduler": {
+                "polled_at": "2026-04-22T08:24:44+00:00",
+                "remote_git_head": "9eec9da",
+                "sync_mode": "full-ssh",
+                "synced_paths": [
+                    "outputs/training",
+                    "outputs/logs/training_matrix",
+                ],
+                "plan": {
+                    "post_train_eval_ready": True,
+                    "first_eleven_completed": True,
+                    "active_evals": [
+                        {
+                            "config_name": "core_all_linear_r16_seed07",
+                            "split": "internal_dev",
+                            "gpu_id": "0",
+                            "status": "running",
+                        }
+                    ],
+                    "pending_internal_dev_evals": [
+                        "core_all_linear_r16_seed13",
+                        "core_all_linear_r32_seed07",
+                    ],
+                    "pending_validation_evals": [],
+                    "gpus": [
+                        {
+                            "gpu_id": "0",
+                            "assignment_kind": "eval",
+                            "assignment_label": "core_all_linear_r16_seed07 (internal_dev)",
+                            "utilization_gpu": 56,
+                            "memory_used": 9149,
+                            "memory_total": 81559,
+                        },
+                        {
+                            "gpu_id": "1",
+                            "assignment_kind": "training",
+                            "assignment_label": "scale_best_assumed_full",
+                            "utilization_gpu": 58,
+                            "memory_used": 34589,
+                            "memory_total": 81559,
+                        },
+                    ],
+                },
+            },
+        }
+    }
+
+    training_report = render_training_report(summary)
+
+    assert "RunPod Eval Queue" in training_report
+    assert "running" in training_report
+    assert "pending" in training_report
+    assert "core_all_linear_r16_seed07" in training_report
+    assert "core_all_linear_r16_seed13" in training_report
+    assert "1 running, 2 pending" in training_report
 
 
 def test_render_training_report_treats_starting_workers_as_running_stage() -> None:
