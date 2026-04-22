@@ -17,6 +17,7 @@ from build_artifacts import (
     appendix_rows,
     canonical_screening_rows,
     finalist_rows,
+    paper_visible_run_roots,
     trained_rows,
 )
 from textvqa_proj.eval.judge_runner import (
@@ -28,30 +29,12 @@ from textvqa_proj.eval.judge_runner import (
 
 
 def paper_run_roots() -> list[Path]:
-    screening = canonical_screening_rows()
-    best_by_model = {}
-    for row in screening:
-        previous = best_by_model.get(row.model)
-        if previous is None or row.metrics["accuracy"] > previous.metrics["accuracy"]:
-            best_by_model[row.model] = row
-
-    selected: list[Path] = []
-    selected.extend(row.path for row in best_by_model.values())
-    selected.extend(row.path for row in finalist_rows())
-    tuned_validation = next(
-        row["path"]
-        for row in trained_rows()
-        if row["split"] == "validation" and row["slug"] == "all-linear-r16-seed13"
+    return paper_visible_run_roots(
+        canonical_screening_rows(),
+        finalist_rows(),
+        appendix_rows(),
+        trained_rows(),
     )
-    selected.append(tuned_validation)
-    deduped: list[Path] = []
-    seen: set[Path] = set()
-    for path in selected:
-        if path in seen:
-            continue
-        seen.add(path)
-        deduped.append(path)
-    return deduped
 
 
 def _total_examples(run_roots: list[Path]) -> int:

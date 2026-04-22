@@ -294,6 +294,43 @@ def maybe_load_judge_similarity(run_root: Path) -> float | None:
     return None
 
 
+def paper_visible_run_roots(
+    screening: list[EvalRow],
+    finalists: list[EvalRow],
+    appendix: list[EvalRow],
+    trained: list[dict[str, object]],
+) -> list[Path]:
+    screening_best = []
+    for backbone in BACKBONE_ORDER:
+        candidates = [row for row in screening if row.model == backbone]
+        if not candidates:
+            continue
+        screening_best.append(max(candidates, key=lambda row: row.metrics["accuracy"]))
+
+    finalists_sorted = sorted(finalists, key=lambda row: row.metrics["accuracy"], reverse=True)
+    trained_internal = sorted(
+        (row for row in trained if row["split"] == "internal-dev"),
+        key=lambda row: row["metrics"]["accuracy"],
+        reverse=True,
+    )
+    tuned_val = next(row for row in trained if row["slug"] == "all-linear-r16-seed13" and row["split"] == "validation")
+
+    selected = [row.path for row in screening_best]
+    selected.extend(row.path for row in finalists_sorted)
+    selected.extend(row.path for row in appendix)
+    selected.extend(Path(row["path"]) for row in trained_internal)
+    selected.append(Path(tuned_val["path"]))
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for path in selected:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
+
+
 def percentage(value: float | None) -> str:
     return "--" if value is None else f"{100 * value:.2f}"
 
@@ -600,6 +637,7 @@ def build_tables(
                 "bleu": row.metrics["bleu"],
                 "meteor": meteor,
                 "rouge_l": row.metrics["rouge_l"],
+                "judge": maybe_load_judge_similarity(row.path),
             }
         )
     for row in finalists_sorted:
@@ -616,6 +654,7 @@ def build_tables(
                 "bleu": row.metrics["bleu"],
                 "meteor": meteor,
                 "rouge_l": row.metrics["rouge_l"],
+                "judge": maybe_load_judge_similarity(row.path),
             }
         )
     main_rows.append(
@@ -630,24 +669,25 @@ def build_tables(
             "bleu": tuned_val["metrics"]["bleu"],
             "meteor": maybe_compute_meteor(tuned_val["path"] / "predictions.jsonl"),
             "rouge_l": tuned_val["metrics"]["rouge_l"],
+            "judge": maybe_load_judge_similarity(Path(tuned_val["path"])),
         }
     )
     write_csv(
         DATA_DIR / "main_results.csv",
         main_rows,
-        ["stage", "model", "setting", "split", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
+        ["stage", "model", "setting", "split", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge"],
     )
 
     with (TABLES_DIR / "main_results_table.tex").open("w") as fh:
-        fh.write("\\begin{tabular}{llcccccc}\n")
+        fh.write("\\begin{tabular}{llccccccc}\n")
         fh.write("\\toprule\n")
-        fh.write("Stage & Model / setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
+        fh.write("Stage & Model / setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L & Judge\\\\\n")
         fh.write("\\midrule\n")
         for row in main_rows:
             label = f"{row['model']} ({row['setting']})"
             fh.write(
                 f"{row['stage']} & {label} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
-                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
@@ -666,22 +706,23 @@ def build_tables(
                 "bleu": row["metrics"]["bleu"],
                 "meteor": maybe_compute_meteor(row["path"] / "predictions.jsonl"),
                 "rouge_l": row["metrics"]["rouge_l"],
+                "judge": maybe_load_judge_similarity(Path(row["path"])),
             }
         )
     write_csv(
         DATA_DIR / "trained_adapter_results.csv",
         trained_rows_csv,
-        ["group", "configuration", "eval_loss", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
+        ["group", "configuration", "eval_loss", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge"],
     )
     with (TABLES_DIR / "trained_adapter_table.tex").open("w") as fh:
-        fh.write("\\begin{tabular}{llcccccc}\n")
+        fh.write("\\begin{tabular}{llccccccc}\n")
         fh.write("\\toprule\n")
-        fh.write("Group & Configuration & Eval loss & Acc. & Cons. & F1 & METEOR & ROUGE-L\\\\\n")
+        fh.write("Group & Configuration & Eval loss & Acc. & Cons. & F1 & METEOR & ROUGE-L & Judge\\\\\n")
         fh.write("\\midrule\n")
         for row in trained_rows_csv:
             fh.write(
                 f"{row['group']} & {row['configuration']} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & "
-                f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
@@ -698,70 +739,26 @@ def build_tables(
                 "bleu": row.metrics["bleu"],
                 "meteor": maybe_compute_meteor(row.path / "predictions.jsonl"),
                 "rouge_l": row.metrics["rouge_l"],
+                "judge": maybe_load_judge_similarity(row.path),
             }
         )
     write_csv(
         DATA_DIR / "appendix_results.csv",
         appendix_rows_csv,
-        ["branch", "setting", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l"],
+        ["branch", "setting", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge"],
     )
     with (TABLES_DIR / "appendix_results_table.tex").open("w") as fh:
-        fh.write("\\begin{tabular}{llcccccc}\n")
+        fh.write("\\begin{tabular}{llccccccc}\n")
         fh.write("\\toprule\n")
-        fh.write("Branch & Setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L\\\\\n")
+        fh.write("Branch & Setting & Acc. & Cons. & F1 & BLEU & METEOR & ROUGE-L & Judge\\\\\n")
         fh.write("\\midrule\n")
         for row in appendix_rows_csv:
             fh.write(
                 f"{row['branch']} & {row['setting']} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
-                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])}\\\\\n"
+                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
-
-    judge_rows = []
-    finalist_judge = maybe_load_judge_similarity(
-        FINALISTS_DIR / "qwen2-5-vl-3b-instruct-short-answer-validation-mps-tuned-v1"
-    )
-    tuned_judge = maybe_load_judge_similarity(
-        TRAINED_EVAL_DIR / "qwen2-5-vl-3b-instruct-all-linear-r16-seed13-train-speed-v3-validation-cuda-runpod-v1"
-    )
-    if finalist_judge is not None:
-        judge_rows.append(
-            {
-                "system": "Zero-shot finalist",
-                "configuration": "Qwen2.5-VL-3B (short-answer)",
-                "accuracy": strongest_finalist.metrics["accuracy"],
-                "judge": finalist_judge,
-            }
-        )
-    if tuned_judge is not None:
-        judge_rows.append(
-            {
-                "system": "Tuned winner",
-                "configuration": "Qwen2.5-VL-3B + LoRA (all-linear r16, seed 13)",
-                "accuracy": tuned_val["metrics"]["accuracy"],
-                "judge": tuned_judge,
-            }
-        )
-    write_csv(
-        DATA_DIR / "judge_validation_results.csv",
-        judge_rows,
-        ["system", "configuration", "accuracy", "judge"],
-    )
-    with (TABLES_DIR / "judge_validation_table.tex").open("w") as fh:
-        if judge_rows:
-            fh.write("\\begin{tabular}{llcc}\n")
-            fh.write("\\toprule\n")
-            fh.write("System & Configuration & Acc. & Judge\\\\\n")
-            fh.write("\\midrule\n")
-            for row in judge_rows:
-                fh.write(
-                    f"{row['system']} & {row['configuration']} & {percentage(row['accuracy'])} & {percentage(row['judge'])}\\\\\n"
-                )
-            fh.write("\\bottomrule\n")
-            fh.write("\\end{tabular}\n")
-        else:
-            fh.write("% Judge table will populate after judge_metrics.json is available for the validation comparison.\n")
 
 
 def main() -> None:

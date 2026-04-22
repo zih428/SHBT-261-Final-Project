@@ -349,7 +349,7 @@ class OpenAIJudgeClient:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
-    async def score_batch(self, batch: list[dict[str, Any]]) -> list[JudgeScoreRecord]:
+    async def _request_batch(self, batch: list[dict[str, Any]]) -> list[JudgeScoreRecord]:
         payload = {
             "model": self.model_name,
             "temperature": 0,
@@ -360,49 +360,64 @@ class OpenAIJudgeClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.post(API_URL, headers=headers, json=payload)
+        if response.status_code == 429:
+            error_payload = response.json().get("error", {})
+            if error_payload.get("code") == "insufficient_quota":
+                raise RuntimeError(
+                    "OpenAI API returned insufficient_quota for the configured key. "
+                    "Add billing or more credits to the project before rerunning judge evaluation."
+                )
+        response.raise_for_status()
+        data = response.json()
+        message = data["choices"][0]["message"]
+        refusal = message.get("refusal")
+        if refusal:
+            raise RuntimeError(f"Judge model refused batch: {refusal}")
+        parsed = json.loads(message["content"])
+        results = parsed["results"]
+        expected_ids = {str(record["sample_id"]) for record in batch}
+        returned_ids = [str(item["sample_id"]) for item in results]
+        if set(returned_ids) != expected_ids or len(returned_ids) != len(expected_ids):
+            raise RuntimeError(
+                f"Judge batch returned mismatched ids. Expected {sorted(expected_ids)} "
+                f"but received {sorted(returned_ids)}."
+            )
+        return [
+            JudgeScoreRecord(
+                sample_id=str(item["sample_id"]),
+                judge_similarity=float(item["score"]),
+                judge_label=item["label"],
+                judge_reason=_default_reason(item["label"]),
+                judge_source="llm",
+                judge_model=self.model_name,
+            )
+            for item in results
+        ]
+
+    async def score_batch(self, batch: list[dict[str, Any]]) -> list[JudgeScoreRecord]:
         attempt = 0
         while True:
             attempt += 1
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                    response = await client.post(API_URL, headers=headers, json=payload)
-                if response.status_code == 429:
-                    error_payload = response.json().get("error", {})
-                    if error_payload.get("code") == "insufficient_quota":
-                        raise RuntimeError(
-                            "OpenAI API returned insufficient_quota for the configured key. "
-                            "Add billing or more credits to the project before rerunning judge evaluation."
-                        )
-                response.raise_for_status()
-                data = response.json()
-                message = data["choices"][0]["message"]
-                refusal = message.get("refusal")
-                if refusal:
-                    raise RuntimeError(f"Judge model refused batch: {refusal}")
-                parsed = json.loads(message["content"])
-                results = parsed["results"]
-                expected_ids = {str(record["sample_id"]) for record in batch}
-                returned_ids = [str(item["sample_id"]) for item in results]
-                if set(returned_ids) != expected_ids or len(returned_ids) != len(expected_ids):
-                    raise RuntimeError(
-                        f"Judge batch returned mismatched ids. Expected {sorted(expected_ids)} "
-                        f"but received {sorted(returned_ids)}."
-                    )
-                return [
-                    JudgeScoreRecord(
-                        sample_id=str(item["sample_id"]),
-                        judge_similarity=float(item["score"]),
-                        judge_label=item["label"],
-                        judge_reason=_default_reason(item["label"]),
-                        judge_source="llm",
-                        judge_model=self.model_name,
-                    )
-                    for item in results
-                ]
+                return await self._request_batch(batch)
             except Exception as exc:  # noqa: BLE001
                 if "insufficient_quota" in str(exc):
                     raise
                 if attempt >= self.max_retries:
+                    if len(batch) > 1:
+                        midpoint = len(batch) // 2
+                        LOGGER.warning(
+                            "Judge batch still unstable after %s attempts; splitting %s items into %s and %s",
+                            attempt,
+                            len(batch),
+                            midpoint,
+                            len(batch) - midpoint,
+                        )
+                        first = await self.score_batch(batch[:midpoint])
+                        second = await self.score_batch(batch[midpoint:])
+                        return first + second
                     raise RuntimeError(
                         f"Judge request failed after {attempt} attempts for batch "
                         f"{[record['sample_id'] for record in batch]}"
