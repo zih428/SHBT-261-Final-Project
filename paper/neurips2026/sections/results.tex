@@ -26,6 +26,16 @@ The finalist stage confirms that the screening winner is not an artifact of the 
 
 The adaptation stage delivers a real validation gain rather than a cosmetic retuning of the zero-shot winner. Figure~\ref{fig:adaptation-summary} reports the headline comparison: the final tuned model, \texttt{all-linear-r16-seed13}, reaches 84.76\% validation accuracy, compared with 78.72\% for the strongest zero-shot finalist, for an absolute improvement of 6.04 points. The same comparison also improves consensus accuracy by 5.95 points, F1 by 4.50 points, and ROUGE-L by 4.11 points. The 95\% confidence intervals for the two validation accuracies do not overlap, which makes the gain difficult to dismiss as evaluation noise.
 
+\begin{table}[t]
+    \centering
+    \small
+    \input{generated/tables/judge_validation_table.tex}
+    \caption{LLM-as-a-Judge comparison for the final validation decision. We apply the semantic judge only to the paper-facing zero-shot winner and the final tuned model, because these are the runs on which the main validation claim rests.}
+    \label{tab:judge-validation}
+\end{table}
+
+The semantic judge agrees with the direction of the exact-match result while tightening its interpretation. Table~\ref{tab:judge-validation} shows that the strongest zero-shot finalist reaches 89.09\% judge similarity, whereas the tuned winner reaches 91.24\%, a gain of 2.15 points. This gap is smaller than the exact-match improvement, which is exactly the pattern we would expect if part of the tuned model's advantage comes from stricter normalization and answer-format control rather than from a wholesale change in semantic competence. In other words, the judge score does not erase the tuning gain; it refines it into a more conservative but still positive semantic improvement.
+
 The internal-dev adapter sweep in Figure~\ref{fig:adaptation-summary} and Table~\ref{tab:trained-adapters} also reveals an important methodological distinction. Training-stage family selection chose \texttt{all-linear-r32} as the winner-conditioned follow-up family because it had the lowest mean internal-dev \texttt{eval\_loss} across seeds. However, the highest post-train internal-dev accuracy among the completed core adapters came from \texttt{all-linear-r16-seed13} at 88.45\%. This is not a contradiction; it is evidence that training loss is a useful control signal for allocating follow-up budget, but not a perfect substitute for the paper-facing metric of answer accuracy. The separation between family selection and final model promotion is therefore justified empirically, not just procedurally.
 
 \begin{figure*}[t]

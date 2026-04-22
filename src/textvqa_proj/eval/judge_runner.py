@@ -316,9 +316,8 @@ def _judge_schema() -> dict[str, Any]:
                                     "type": "string",
                                     "enum": ["semantic_match", "partial_match", "mismatch"],
                                 },
-                                "reason": {"type": "string"},
                             },
-                            "required": ["sample_id", "score", "label", "reason"],
+                            "required": ["sample_id", "score", "label"],
                         },
                     }
                 },
@@ -326,6 +325,14 @@ def _judge_schema() -> dict[str, Any]:
             },
         },
     }
+
+
+def _default_reason(label: JudgeLabel) -> str:
+    if label == "semantic_match":
+        return "Judge marked the prediction as semantically equivalent to an acceptable answer."
+    if label == "partial_match":
+        return "Judge marked the prediction as a substantial but incomplete near match."
+    return "Judge marked the prediction as a semantic mismatch."
 
 
 class OpenAIJudgeClient:
@@ -386,7 +393,7 @@ class OpenAIJudgeClient:
                         sample_id=str(item["sample_id"]),
                         judge_similarity=float(item["score"]),
                         judge_label=item["label"],
-                        judge_reason=str(item["reason"]),
+                        judge_reason=_default_reason(item["label"]),
                         judge_source="llm",
                         judge_model=self.model_name,
                     )

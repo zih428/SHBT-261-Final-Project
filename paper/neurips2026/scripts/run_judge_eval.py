@@ -8,6 +8,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+REPO_ROOT = SCRIPT_DIR.parents[2]
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from build_artifacts import (
     appendix_rows,
@@ -34,13 +38,12 @@ def paper_run_roots() -> list[Path]:
     selected: list[Path] = []
     selected.extend(row.path for row in best_by_model.values())
     selected.extend(row.path for row in finalist_rows())
-    selected.extend(
+    tuned_validation = next(
         row["path"]
         for row in trained_rows()
-        if row["split"] == "internal-dev"
-        or (row["split"] == "validation" and row["slug"] == "all-linear-r16-seed13")
+        if row["split"] == "validation" and row["slug"] == "all-linear-r16-seed13"
     )
-    selected.extend(row.path for row in appendix_rows())
+    selected.append(tuned_validation)
     deduped: list[Path] = []
     seen: set[Path] = set()
     for path in selected:
