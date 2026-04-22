@@ -94,6 +94,13 @@ def test_render_progress_report_mentions_stage_counts() -> None:
                 "synced_paths": ["outputs/training"],
                 "eval_runs": [
                     {
+                        "config_name": "core_attn_r32_seed13",
+                        "split": "internal_dev",
+                        "status": "completed",
+                        "processed_count": 2000,
+                        "total_count": 2000,
+                    },
+                    {
                         "config_name": "core_all_linear_r16_seed07",
                         "split": "internal_dev",
                         "status": "running",
@@ -480,6 +487,13 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
                 ],
                 "eval_runs": [
                     {
+                        "config_name": "core_attn_r32_seed13",
+                        "split": "internal_dev",
+                        "status": "completed",
+                        "processed_count": 2000,
+                        "total_count": 2000,
+                    },
+                    {
                         "config_name": "core_all_linear_r16_seed07",
                         "split": "internal_dev",
                         "status": "running",
@@ -539,6 +553,9 @@ def test_render_training_report_lists_active_and_pending_eval_queue() -> None:
     assert "1 running, 2 pending" in training_report
     assert "100/2000" in training_report
     assert "now" in training_report
+    eval_section = training_report.split("Post-Train Eval Runs", maxsplit=1)[1]
+    assert eval_section.index("completed") < eval_section.index("running")
+    assert eval_section.index("running") < eval_section.index("pending")
 
 
 def test_render_training_report_lists_completed_eval_runs_across_splits() -> None:

@@ -398,31 +398,7 @@ def _eval_queue_rows(
             )
             slot_available_at.append(estimated_end or now)
 
-    rows: list[list[str]] = []
-    for active in active_evals:
-        config_name = str(active.get("config_name") or "-")
-        split = str(active.get("split") or "-")
-        run = eval_runs.get((config_name, split), {})
-        eta_at = _format_eta(
-            started_at=run.get("started_at"),
-            updated_at=run.get("updated_at"),
-            current_step=run.get("processed_count"),
-            max_steps=run.get("total_count"),
-            resumed_from_step=run.get("resumed_from_count"),
-        )
-        rows.append(
-            [
-                "running",
-                str(active.get("gpu_id") or "-"),
-                _ellipsize(config_name, 28),
-                split,
-                _eval_progress_cell(run),
-                _format_eta_duration(updated_at=run.get("updated_at"), eta_at=eta_at) or "-",
-                "now",
-                _format_short_eastern_cell(eta_at) or "-",
-            ]
-        )
-
+    completed_rows: list[list[str]] = []
     completed_items = sorted(
         (
             (config_name, split, run)
@@ -434,7 +410,7 @@ def _eval_queue_rows(
         key=lambda item: (item[1], item[0]),
     )
     for config_name, split, run in completed_items:
-        rows.append(
+        completed_rows.append(
             [
                 "completed",
                 "-",
@@ -447,6 +423,32 @@ def _eval_queue_rows(
             ]
         )
 
+    running_rows: list[list[str]] = []
+    for active in active_evals:
+        config_name = str(active.get("config_name") or "-")
+        split = str(active.get("split") or "-")
+        run = eval_runs.get((config_name, split), {})
+        eta_at = _format_eta(
+            started_at=run.get("started_at"),
+            updated_at=run.get("updated_at"),
+            current_step=run.get("processed_count"),
+            max_steps=run.get("total_count"),
+            resumed_from_step=run.get("resumed_from_count"),
+        )
+        running_rows.append(
+            [
+                "running",
+                str(active.get("gpu_id") or "-"),
+                _ellipsize(config_name, 28),
+                split,
+                _eval_progress_cell(run),
+                _format_eta_duration(updated_at=run.get("updated_at"), eta_at=eta_at) or "-",
+                "now",
+                _format_short_eastern_cell(eta_at) or "-",
+            ]
+        )
+
+    pending_rows: list[list[str]] = []
     pending_items = [(config_name, "internal_dev") for config_name in pending_internal]
     pending_items.extend((config_name, "validation") for config_name in pending_validation)
     for config_name, split in pending_items:
@@ -460,7 +462,7 @@ def _eval_queue_rows(
         projected_end = projected_start + timedelta(seconds=duration_seconds)
         if slot_index is not None:
             slot_available_at[slot_index] = projected_end
-        rows.append(
+        pending_rows.append(
             [
                 "pending",
                 "-",
@@ -472,7 +474,7 @@ def _eval_queue_rows(
                 _format_short_eastern_cell(projected_end.isoformat()) or "-",
             ]
         )
-    return rows
+    return completed_rows + running_rows + pending_rows
 
 
 def _latest_scheduler_state(repo_root: Path) -> dict[str, Any] | None:
