@@ -1,0 +1,60 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{Zero-shot screening and finalist reruns}
+
+The internal-dev screening matrix immediately separates backbone quality from prompt sensitivity. Figure~\ref{fig:screening-heatmap} shows that Qwen2.5-VL-3B dominates the full screening stage, with its best configuration (\texttt{short\_answer}) reaching 81.05\% accuracy and its weakest OCR-heavy variant still remaining competitive. The ranking is not a trivial prompt artifact: even after allowing six prompt/OCR settings per backbone, Qwen remains clearly ahead of LLaVA-Phi-3-mini, BLIP-2 OPT-2.7B, InternVL2.5-4B, and the OCR lexical baseline. The same figure also shows that prompt sensitivity is model dependent. Qwen prefers concise answer formatting, whereas LLaVA benefits more from OCR-normalized prompting; by contrast, BLIP-2 remains weak across all prompt variants, and InternVL2.5-4B never becomes competitive under the study protocol.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/screening_heatmap.png}
+    \caption{Internal-dev screening accuracy across the full backbone--prompt matrix. Qwen2.5-VL-3B is the only family that remains strong across all OCR-sensitive prompt variants, and its short-answer prompt is the best zero-shot configuration overall. The heatmap also makes the model-dependent nature of OCR prompting visible: OCR normalization helps LLaVA markedly more than it helps Qwen, while the lexical OCR baseline remains near zero throughout.}
+    \label{fig:screening-heatmap}
+\end{figure*}
+
+The finalist stage confirms that the screening winner is not an artifact of the internal-dev split. Table~\ref{tab:main-results} shows that the four promoted Qwen settings occupy the top four validation positions, led again by \texttt{short\_answer} at 78.72\% accuracy. The strongest non-Qwen finalist, LLaVA-Phi-3-mini with OCR-normalized prompting, reaches only 50.36\%, leaving a 28.36-point gap to the best Qwen finalist. This margin is too large to interpret as prompt noise. Instead, it indicates that under the current evaluation boundary, backbone quality dominates the ranking and that OCR-aware prompting changes ordering within a family more than it changes ordering across families.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \resizebox{\textwidth}{!}{\input{generated/tables/main_results_table.tex}}
+    \caption{Main benchmark results. The table reports the best internal-dev screening configuration for each backbone, all promoted validation finalists, and the final tuned model. Exact-match accuracy is the primary score; consensus accuracy, F1, BLEU, METEOR, and ROUGE-L provide secondary semantic context. The tuned Qwen adapter becomes the strongest overall validation system.}
+    \label{tab:main-results}
+\end{table*}
+
+\subsection{Winner-conditioned LoRA adaptation}
+
+The adaptation stage delivers a real validation gain rather than a cosmetic retuning of the zero-shot winner. Figure~\ref{fig:adaptation-summary} reports the headline comparison: the final tuned model, \texttt{all-linear-r16-seed13}, reaches 84.76\% validation accuracy, compared with 78.72\% for the strongest zero-shot finalist, for an absolute improvement of 6.04 points. The same comparison also improves consensus accuracy by 5.95 points, F1 by 4.50 points, and ROUGE-L by 4.11 points. The 95\% confidence intervals for the two validation accuracies do not overlap, which makes the gain difficult to dismiss as evaluation noise.
+
+The internal-dev adapter sweep in Figure~\ref{fig:adaptation-summary} and Table~\ref{tab:trained-adapters} also reveals an important methodological distinction. Training-stage family selection chose \texttt{all-linear-r32} as the winner-conditioned follow-up family because it had the lowest mean internal-dev \texttt{eval\_loss} across seeds. However, the highest post-train internal-dev accuracy among the completed core adapters came from \texttt{all-linear-r16-seed13} at 88.45\%. This is not a contradiction; it is evidence that training loss is a useful control signal for allocating follow-up budget, but not a perfect substitute for the paper-facing metric of answer accuracy. The separation between family selection and final model promotion is therefore justified empirically, not just procedurally.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/adaptation_summary.png}
+    \caption{Adaptation summary. Left: the final tuned Qwen model improves validation accuracy by 6.04 points over the strongest zero-shot finalist. Middle: internal-dev post-train accuracy across the full 12-run LoRA study, including the core matrix and winner-conditioned follow-ups. Right: validation gains are largest for OCR-grounded answers, especially those that require normalized OCR matching.}
+    \label{fig:adaptation-summary}
+\end{figure*}
+
+Seed stability in the core matrix is also stronger than the raw leaderboard might suggest. Averaging the two seeds within each family, \texttt{all-linear-r16} reaches 87.95\% internal-dev accuracy, compared with 87.63\% for \texttt{all-linear-r32}, 87.63\% for \texttt{attn-r16}, and 87.43\% for \texttt{attn-r32}. More importantly, the seed ranges are small: 1.00 point for \texttt{all-linear-r16}, 0.15 for \texttt{all-linear-r32}, 0.05 for \texttt{attn-r16}, and 0.25 for \texttt{attn-r32}. The study therefore does not hinge on a single anomalous seed.
+
+The follow-up runs sharpen the interpretation of the core matrix rather than merely extending it. The OCR ablation pair differs by only 0.10 internal-dev accuracy points (87.65\% without OCR conditioning versus 87.55\% with OCR conditioning), suggesting that once the model is adapted, explicit OCR toggling matters less than it did in zero-shot prompting. The data-scaling pair is more informative: moving from the 25 pct setting to the full training-remainder run raises internal-dev accuracy from 87.60\% to 87.90\%. This gain is modest, but directionally consistent with the training-stage \texttt{eval\_loss} improvement and supports the choice to spend the final training budget on the full-data configuration.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \resizebox{\textwidth}{!}{\input{generated/tables/trained_adapter_table.tex}}
+    \caption{Post-train internal-dev results for the full LoRA study. Core-matrix rows compare target strategy, rank, and seed. Follow-up rows inherit the winner-conditioned family and probe OCR conditioning or data scaling. The table makes the distinction between training-stage \texttt{eval\_loss} and post-train answer accuracy explicit.}
+    \label{tab:trained-adapters}
+\end{table*}
+
+\subsection{Appendix robustness runs}
+
+The appendix branch strengthens the analysis without altering the main winner-selection funnel. Table~\ref{tab:appendix-results} shows that the strongest appendix configuration, \texttt{question\_routed}, reaches 75.82\% validation accuracy. This is competitive, but it remains below the finalist-stage \texttt{short\_answer} configuration at 78.72\%, which is exactly the role that the appendix branch should play: it offers stress tests and alternative prompt formulations that enrich the interpretation, but it does not retroactively rewrite the finalist protocol. Among the stress tests, lowering the generation cap to 4 hurts performance severely, falling to 64.76\%, while more moderate caps remain close to the finalist baseline. The appendix therefore supports a nuanced conclusion: Qwen is reasonably robust to modest decoding perturbations, but overly aggressive truncation is materially harmful.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \resizebox{\textwidth}{!}{\input{generated/tables/appendix_results_table.tex}}
+    \caption{Validation robustness results from the appendix branch. These runs are intentionally secondary to the main funnel and are used to probe prompt-routing and decoding sensitivity without changing the core winner-selection logic.}
+    \label{tab:appendix-results}
+\end{table*}

@@ -34,12 +34,15 @@
 \maketitle
 
 \begin{abstract}
-TextVQA requires a model to read scene text, ground it in visual context, and answer natural-language questions with high exact-match precision. Although open-source vision-language models (VLMs) have improved rapidly, rigorous TextVQA studies still face a practical tension between benchmark breadth, adaptation depth, and limited compute. We address this problem with a staged empirical protocol that combines broad zero-shot screening, disciplined finalist reruns, and winner-conditioned LoRA fine-tuning within a single reproducible pipeline. The study benchmarks four open-source VLM families and an OCR lexical baseline, uses a stratified internal development split to preserve the official validation set for serious comparisons, and separates training-stage family selection from post-training accuracy-based model promotion. The resulting design is deliberately structured to produce interpretable model comparisons, defensible adaptation decisions, and reproducible evidence under a realistic compute budget while retaining enough experimental breadth to support a substantive analysis of OCR usage, prompt sensitivity, and parameter-efficient adaptation.
+TextVQA requires a model to read scene text, ground it in visual context, and answer short natural-language questions under exact-match evaluation. We present a staged empirical study that benchmarks open-source vision-language models (VLMs) under a funnel protocol designed to preserve validation integrity while still supporting broad exploration. The protocol combines stratified internal-dev screening, finalist reruns on the official validation split, winner-conditioned LoRA fine-tuning, and post-training adapter evaluation under a reproducible local-plus-remote execution boundary. Across four open-source VLM families and OCR-aware prompting variants, Qwen2.5-VL-3B emerges as the clear zero-shot winner, reaching 81.05\% internal-dev accuracy and 78.72\% on validation with a short-answer prompt. A subsequent 12-run LoRA study raises the final validation score to 84.76\%, a gain of 6.04 accuracy points over the strongest zero-shot finalist, with parallel gains in consensus accuracy, F1, and ROUGE-L. The trained-model analysis further shows that adaptation gains are concentrated in OCR-grounded cases rather than OCR-free questions, while the winner-conditioned follow-up runs reveal only marginal sensitivity to OCR toggling after adaptation and a modest but consistent gain from scaling the training pool. Beyond the headline result, the paper contributes a defendable evaluation funnel, a compute-aware multi-stage study design, and a complete reproducible artifact stack that supports quantitative, qualitative, and robustness-oriented analysis rather than a single isolated benchmark number.
 \end{abstract}
 
 \input{sections/introduction}
 \input{sections/related_work}
 \input{sections/study_design}
+\input{sections/results}
+\input{sections/analysis}
+\input{sections/conclusion}
 
 \bibliographystyle{plainnat}
 \bibliography{references}
