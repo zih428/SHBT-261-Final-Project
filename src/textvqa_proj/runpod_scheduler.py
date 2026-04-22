@@ -822,6 +822,41 @@ def _rsync_remote_path(
     return False
 
 
+def _local_training_artifacts_complete(repo_root: Path, snapshot: dict[str, Any]) -> bool:
+    training = snapshot.get("training", {})
+    runs = training.get("runs") if isinstance(training, dict) else None
+    if not isinstance(runs, list):
+        return False
+    target_run = None
+    for run in runs:
+        if run.get("config_name") == LAST_TRAINING_CONFIG:
+            target_run = run
+            break
+    if not isinstance(target_run, dict) or target_run.get("status") != "completed":
+        return False
+    remote_root = str(target_run.get("root") or "").strip()
+    if not remote_root.startswith(f"{REMOTE_REPO_ROOT}/"):
+        return False
+    local_root = repo_root / Path(remote_root).relative_to(REMOTE_REPO_ROOT)
+    trainer_state_path = local_root / "trainer_state.json"
+    if not trainer_state_path.exists():
+        return False
+    try:
+        trainer_state = json.loads(trainer_state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    global_step = trainer_state.get("global_step")
+    max_steps = trainer_state.get("max_steps")
+    checkpoint_step = trainer_state.get("checkpoint_step")
+    if not isinstance(global_step, int) or not isinstance(max_steps, int):
+        return False
+    if global_step < max_steps:
+        return False
+    if isinstance(checkpoint_step, int) and checkpoint_step < max_steps:
+        return False
+    return True
+
+
 def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
     sync_target = _configured_sync_target() or _snapshot_sync_target(snapshot)
     if sync_target is None:
@@ -836,9 +871,23 @@ def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
             ),
         }
     synced: list[str] = []
+    skipped: list[str] = []
     available_sync_paths = snapshot.get("sync_paths", {})
-    for relative_path in SYNC_RELATIVE_PATHS:
+    plan = snapshot.get("plan", {}) if isinstance(snapshot.get("plan"), dict) else {}
+    training_complete = bool(plan.get("training_complete"))
+    skip_training_sync = training_complete and _local_training_artifacts_complete(
+        repo_root, snapshot
+    )
+    sync_paths = [
+        Path("outputs/runs/trained_adapters"),
+        Path("outputs/logs/training_matrix"),
+        Path("outputs/training"),
+    ]
+    for relative_path in sync_paths:
         if not available_sync_paths.get(str(relative_path)):
+            continue
+        if relative_path == Path("outputs/training") and skip_training_sync:
+            skipped.append(str(relative_path))
             continue
         if _rsync_remote_path(sync_target, relative_path, repo_root):
             synced.append(str(relative_path))
@@ -848,6 +897,14 @@ def sync_results(repo_root: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
             f"Copied updated artifact paths from RunPod over full SSH "
             f"({sync_target['host']}:{sync_target['port']})."
         )
+    if skipped:
+        skipped_text = ", ".join(skipped)
+        if synced:
+            message += f" Skipped {skipped_text} because local final training artifacts are already complete."
+        else:
+            message = (
+                f"Skipped {skipped_text} because local final training artifacts are already complete."
+            )
     return {
         "synced_paths": synced,
         "sync_mode": "full-ssh",

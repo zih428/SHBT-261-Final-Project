@@ -7,6 +7,7 @@ from pathlib import Path
 from textvqa_proj.runpod_scheduler import (
     REMOTE_STATE_WRITE_TIMEOUT_SECONDS,
     STATE_RELATIVE_PATH,
+    _local_training_artifacts_complete,
     _write_remote_state,
     build_scheduler_plan,
     run_scheduler_cycle,
@@ -288,10 +289,73 @@ def test_sync_results_uses_snapshot_full_ssh_target_when_available(
     assert sync_state["sync_mode"] == "full-ssh"
     assert sync_state["sync_ready"] is True
     assert sync_state["synced_paths"] == [
-        "outputs/training",
         "outputs/logs/training_matrix",
+        "outputs/training",
     ]
     assert calls == [("216.243.220.223", "16291"), ("216.243.220.223", "16291")]
+
+
+def test_local_training_artifacts_complete_requires_final_completed_state(tmp_path: Path) -> None:
+    snapshot = _base_snapshot()
+    for run in snapshot["training"]["runs"]:
+        if run["config_name"] == "scale_best_assumed_full":
+            run["status"] = "completed"
+            run["root"] = "/workspace/SHBT-261-Final-Project/outputs/training/lora-data-scaling/final-run"
+            break
+    local_root = tmp_path / "outputs/training/lora-data-scaling/final-run"
+    local_root.mkdir(parents=True, exist_ok=True)
+    (local_root / "trainer_state.json").write_text(
+        json.dumps({"global_step": 4076, "max_steps": 4076, "checkpoint_step": 4076})
+    )
+
+    assert _local_training_artifacts_complete(tmp_path, snapshot) is True
+
+
+def test_sync_results_skips_heavy_training_sync_when_local_final_training_is_complete(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    snapshot = _base_snapshot()
+    for run in snapshot["training"]["runs"]:
+        run["status"] = "completed"
+        if run["config_name"] == "scale_best_assumed_full":
+            run["root"] = "/workspace/SHBT-261-Final-Project/outputs/training/lora-data-scaling/final-run"
+    snapshot["plan"] = {"training_complete": True}
+    snapshot["sync_paths"] = {
+        "outputs/training": True,
+        "outputs/runs/trained_adapters": True,
+        "outputs/logs/training_matrix": True,
+    }
+    snapshot["sync_target"] = {
+        "host": "216.243.220.223",
+        "port": "16291",
+        "user": "root",
+    }
+    local_root = tmp_path / "outputs/training/lora-data-scaling/final-run"
+    local_root.mkdir(parents=True, exist_ok=True)
+    (local_root / "trainer_state.json").write_text(
+        json.dumps({"global_step": 4076, "max_steps": 4076, "checkpoint_step": 4076})
+    )
+
+    calls: list[Path] = []
+
+    def fake_rsync(sync_target, relative_path, repo_root):
+        calls.append(relative_path)
+        return True
+
+    monkeypatch.setattr("textvqa_proj.runpod_scheduler._rsync_remote_path", fake_rsync)
+
+    sync_state = sync_results(tmp_path, snapshot)
+
+    assert sync_state["synced_paths"] == [
+        "outputs/runs/trained_adapters",
+        "outputs/logs/training_matrix",
+    ]
+    assert "Skipped outputs/training" in sync_state["sync_message"]
+    assert calls == [
+        Path("outputs/runs/trained_adapters"),
+        Path("outputs/logs/training_matrix"),
+    ]
 
 
 def test_run_scheduler_cycle_refreshes_snapshot_after_launch_action(
