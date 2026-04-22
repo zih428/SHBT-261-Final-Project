@@ -1236,9 +1236,29 @@ def _render_scheduler_sections(
     live_gpu_tasks: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     plan = scheduler.get("plan", {})
-    active_evals = [
+    snapshot_active_evals = [
         item for item in (plan.get("active_evals") or []) if isinstance(item, dict)
     ]
+    active_evals = snapshot_active_evals
+    if live_gpu_tasks is not None:
+        live_active_evals: list[dict[str, Any]] = []
+        for gpu in live_gpu_tasks:
+            if not isinstance(gpu, dict) or gpu.get("assignment_kind") != "eval":
+                continue
+            label = str(gpu.get("assignment_label") or "")
+            split = "-"
+            config_name = label
+            if label.endswith(")") and " (" in label:
+                config_name, split = label[:-1].rsplit(" (", maxsplit=1)
+            live_active_evals.append(
+                {
+                    "config_name": config_name,
+                    "split": split,
+                    "gpu_id": str(gpu.get("gpu_id") or "-"),
+                    "status": "running",
+                }
+            )
+        active_evals = live_active_evals
     pending_internal = [str(item) for item in (plan.get("pending_internal_dev_evals") or [])]
     pending_validation = [str(item) for item in (plan.get("pending_validation_evals") or [])]
     pending_total = len(pending_internal) + len(pending_validation)
