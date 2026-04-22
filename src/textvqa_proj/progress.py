@@ -1244,9 +1244,28 @@ def _report_training_state(training: dict[str, Any]) -> dict[str, Any]:
     remote_training = scheduler.get("training")
     if not isinstance(remote_training, dict) or not remote_training.get("runs"):
         return training
-    merged = dict(training)
-    for key in ("counts", "status", "active_run", "runs", "training_overlays"):
-        if key in remote_training:
-            merged[key] = remote_training[key]
+    direct_freshness = _training_snapshot_freshness(training)
+    remote_freshness = _training_snapshot_freshness(remote_training)
+    preferred = remote_training if remote_freshness > direct_freshness else training
+    merged = dict(preferred)
     merged["scheduler"] = scheduler
     return merged
+
+
+def _training_snapshot_freshness(training: dict[str, Any]) -> tuple[datetime | None, int, int]:
+    latest_updated: datetime | None = None
+    max_step = -1
+    non_pending_runs = 0
+    for run in training.get("runs") or []:
+        if not isinstance(run, dict):
+            continue
+        status = str(run.get("status") or "")
+        if status and status != "pending":
+            non_pending_runs += 1
+        updated_at = _parse_iso(run.get("updated_at"))
+        if updated_at and (latest_updated is None or updated_at > latest_updated):
+            latest_updated = updated_at
+        current_step = run.get("current_step")
+        if isinstance(current_step, int):
+            max_step = max(max_step, current_step)
+    return (latest_updated, max_step, non_pending_runs)
