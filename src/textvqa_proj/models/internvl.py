@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from PIL import Image
+
 from textvqa_proj.config import GenerationSettings
 from textvqa_proj.data.dataset import TextVQASample
 from textvqa_proj.models.base import BaseModelAdapter, build_generation_kwargs
 from textvqa_proj.prompting.builders import PromptBundle
 from textvqa_proj.utils.device import pick_device
-from textvqa_proj.utils.hf import local_files_only
+from textvqa_proj.utils.hf import local_files_only, resolve_pretrained_source
 from textvqa_proj.utils.io import load_image
 from textvqa_proj.utils.perf import release_torch_cache
 
@@ -70,7 +72,7 @@ def dynamic_preprocess(
     target_width = image_size * target_aspect_ratio[0]
     target_height = image_size * target_aspect_ratio[1]
     blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
-    resized = image.resize((target_width, target_height))
+    resized = image.resize((target_width, target_height), resample=Image.Resampling.BICUBIC)
     processed_images: list[Any] = []
     horizontal_tiles = target_width // image_size
     for block_index in range(blocks):
@@ -82,7 +84,9 @@ def dynamic_preprocess(
         )
         processed_images.append(resized.crop(box))
     if use_thumbnail and len(processed_images) != 1:
-        processed_images.append(image.resize((image_size, image_size)))
+        processed_images.append(
+            image.resize((image_size, image_size), resample=Image.Resampling.BICUBIC)
+        )
     return processed_images
 
 
@@ -115,21 +119,29 @@ class InternVL25Adapter(BaseModelAdapter):
             PreTrainedModel.all_tied_weights_keys = {}  # type: ignore[attr-defined]
 
         self._dtype = getattr(torch, self.settings.model.torch_dtype, torch.float16)
-        self._model = AutoModel.from_pretrained(
+        model_source = resolve_pretrained_source(
             self.settings.model.model_name,
             revision=self.settings.model.revision,
+            local_only=local_files_only(self.settings),
+        )
+        self._model = AutoModel.from_pretrained(
+            model_source,
             torch_dtype=self._dtype,
             trust_remote_code=self.settings.model.trust_remote_code,
-            local_files_only=local_files_only(self.settings),
+            low_cpu_mem_usage=True,
+            local_files_only=True,
         ).eval()
         self._model.to(self._device)
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            self.settings.model.model_name,
+        tokenizer_source = resolve_pretrained_source(
+            self.settings.model.processor_name or self.settings.model.model_name,
             revision=self.settings.model.revision,
+            local_only=local_files_only(self.settings),
+        )
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_source,
             trust_remote_code=self.settings.model.trust_remote_code,
             use_fast=False,
-            fix_mistral_regex=True,
-            local_files_only=local_files_only(self.settings),
+            local_files_only=True,
         )
 
     def unload(self) -> None:
@@ -181,7 +193,25 @@ class InternVL25Adapter(BaseModelAdapter):
         questions = [f"<image>\n{prompt.user_message}" for prompt in prompts]
         generation_config = build_generation_kwargs(generation)
         with torch.inference_mode():
-            if hasattr(self._model, "batch_chat"):
+            if hasattr(self._model, "chat") and (
+                len(samples) == 1 or str(self._device) == "mps"
+            ):
+                responses = [
+                    self._model.chat(
+                        self._tokenizer,
+                        chunk,
+                        question,
+                        generation_config,
+                        num_patches_list=[patch_count],
+                    )
+                    for chunk, question, patch_count in zip(
+                        pixel_value_chunks,
+                        questions,
+                        num_patches_list,
+                        strict=True,
+                    )
+                ]
+            elif hasattr(self._model, "batch_chat"):
                 responses = self._model.batch_chat(
                     self._tokenizer,
                     pixel_values,

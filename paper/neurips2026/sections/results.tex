@@ -3,7 +3,7 @@
 
 \subsection{Zero-shot screening and finalist reruns}
 
-The internal-dev screening matrix immediately separates backbone quality from prompt sensitivity. Figure~\ref{fig:screening-heatmap} shows that Qwen2.5-VL-3B dominates the full screening stage, with its best configuration (\texttt{short\_answer}) reaching 81.05\% accuracy and its weakest OCR-heavy variant still remaining competitive. The ranking is not a trivial prompt artifact: even after allowing six prompt/OCR settings per backbone, Qwen remains clearly ahead of LLaVA-Phi-3-mini, BLIP-2 OPT-2.7B, InternVL2.5-4B, and the OCR lexical baseline. The same figure also shows that prompt sensitivity is model dependent. Qwen prefers concise answer formatting, whereas LLaVA benefits more from OCR-normalized prompting; by contrast, BLIP-2 remains weak across all prompt variants, and InternVL2.5-4B never becomes competitive under the study protocol.
+The internal-dev screening matrix immediately separates backbone quality from prompt sensitivity. Figure~\ref{fig:screening-heatmap} shows that Qwen2.5-VL-3B dominates the full screening stage, with its best configuration (\texttt{short\_answer}) reaching 81.05\% accuracy and its weakest OCR-heavy variant still remaining competitive. The ranking is not a trivial prompt artifact: even after allowing six prompt/OCR settings per backbone, Qwen remains clearly ahead of LLaVA-Phi-3-mini, BLIP-2 OPT-2.7B, InternVL2.5-4B, and the OCR lexical baseline. The same figure also shows that prompt sensitivity is model dependent. Qwen prefers concise answer formatting, whereas LLaVA benefits more from OCR-normalized prompting; by contrast, BLIP-2 remains weak across all prompt variants. The InternVL2.5-4B row should be read more cautiously: artifact inspection found many punctuation-only generations under the original Apple-Silicon MPS batch path, so the row is retained for reproducibility but not interpreted as evidence about the public checkpoint's intrinsic capability.
 
 \begin{figure*}[t]
     \centering
@@ -24,13 +24,13 @@ The finalist stage confirms that the screening winner transfers to the official 
 
 \subsection{Winner-conditioned LoRA adaptation}
 
-The adaptation stage improves the official validation result, not only the internal diagnostic split. Figure~\ref{fig:adaptation-summary} reports the headline comparison: the final tuned model, \texttt{all-linear-r16-seed13}, reaches 84.76\% validation accuracy, compared with 78.72\% for the strongest zero-shot finalist, for an absolute improvement of 6.04 points. The same comparison also improves consensus accuracy by 5.95 points, F1 by 4.50 points, and ROUGE-L by 4.11 points. Because both systems are evaluated on the same 5,000 validation questions, we also run a paired bootstrap over examples. The paired 95\% confidence interval for the accuracy gain is $[5.00, 7.04]$ points, and an exact McNemar test on the discordant decisions gives $p=1.97\times10^{-32}$.
+The adaptation stage improves the official validation result, not only the internal diagnostic split. Figure~\ref{fig:adaptation-summary} and Table~\ref{tab:validation-headline} give the direct zero-shot versus fine-tuned comparison required by the project specification: the final tuned model, \texttt{all-linear-r16-seed13}, reaches 84.76\% validation accuracy, compared with 78.72\% for the strongest zero-shot finalist, for an absolute improvement of 6.04 points. The same comparison also improves consensus accuracy by 5.95 points, F1 by 4.50 points, and ROUGE-L by 4.11 points. BLEU is the exception, decreasing slightly from 14.88 to 14.26 despite the exact-match gain; we interpret this as a known limitation of corpus BLEU on short, multi-reference answers rather than as evidence against the main result. Because both systems are evaluated on the same 5,000 validation questions, we also run a paired bootstrap over examples. The paired 95\% confidence interval for the accuracy gain is $[5.00, 7.04]$ points, and an exact McNemar test on the discordant decisions gives $p=1.97\times10^{-32}$.
 
 \begin{table}[t]
     \centering
     \small
     \input{generated/tables/validation_headline_table.tex}
-    \caption{Official validation headline comparison. Bold entries mark the stronger system-level metric. The paired gain is computed over the same 5,000 validation questions and is therefore a stronger test than comparing independent intervals alone.}
+    \caption{Zero-shot versus fine-tuned official validation comparison. Bold entries mark the stronger system-level metric. The paired gain is computed over the same 5,000 validation questions and is therefore a stronger test than comparing independent intervals alone.}
     \label{tab:validation-headline}
 \end{table}
 

@@ -327,7 +327,7 @@ Each training run saves:
 - The main fine-tuning path remains intentionally Qwen-first because it is the backbone with the cleanest and most mature LoRA path in this repo.
 - Paper-facing final claims are anchored on the official validation split. Internal-dev is question-disjoint from training but not fully image-disjoint, so it is used for screening, adapter diagnostics, and budget allocation rather than final evidence.
 - `Acc.` in paper tables is exact any-match after normalization; `Cons.` is the TextVQA-style consensus score `min(matches / 3, 1)`.
-- The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, and LLaVA run most reliably at evaluation batch size `1`, while InternVL benefits from `2`.
+- The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, LLaVA, and InternVL run most reliably at evaluation batch size `1`. InternVL's MPS batch path produced punctuation-only generations in artifact audits, so the adapter now prefers the single-sample `chat` path on MPS.
 - The batch runner now wraps long subprocesses with `caffeinate` when available so the machine does not idle-sleep in the middle of long evaluation or training jobs.
 - LLaVA batching beyond `1` was re-checked on this machine against the real finalist prompt path and was not enabled, because it changed deterministic outputs relative to the single-sample baseline.
 - OCR-heavy prompt variants are capped at `32` OCR tokens in the committed configs to control prompt growth without changing the experiment families.
