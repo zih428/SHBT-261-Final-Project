@@ -4,8 +4,8 @@ Resumable, machine-tuned experimentation code for the SHBT 261 TextVQA final pro
 
 ## Project docs
 
-- [CURRENT_EXPERIMENT_DESIGN.md](CURRENT_EXPERIMENT_DESIGN.md): canonical description of the current experiment design, rationale, requirement mapping, and "above and beyond" scope
-- [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md): focused note on why only the training stage moved to remote CUDA and how that boundary stays scientifically clean
+- [docs/CURRENT_EXPERIMENT_DESIGN.md](docs/CURRENT_EXPERIMENT_DESIGN.md): canonical description of the current experiment design, rationale, requirement mapping, and "above and beyond" scope
+- [docs/REMOTE_GPU_TRAINING_PLAN.md](docs/REMOTE_GPU_TRAINING_PLAN.md): focused note on why only the training stage moved to remote CUDA and how that boundary stays scientifically clean
 
 ## Canonical hardware context
 
@@ -26,7 +26,8 @@ Those specs are the reason the repo is tuned the way it is:
 
 ## What is here
 
-- Typed Python package under `src/textvqa_proj`
+- Typed Python package under `src/textvqa_proj`, the canonical source package installed by `pyproject.toml`
+- Minimal top-level `textvqa_proj/__init__.py` compatibility shim so repo-local `python -m textvqa_proj.cli ...` calls resolve to the canonical `src/` package even before installation
 - Layered TOML configs for data, models, evaluation, and training
 - Resumable evaluation runs with append-only prediction logs
 - Resumable Qwen LoRA training with checkpoint recovery

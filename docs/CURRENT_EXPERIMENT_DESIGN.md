@@ -13,7 +13,7 @@ It is meant to answer four questions clearly:
 
 This file is intentionally different from:
 
-- [README.md](README.md), which is the operator/system doc
+- [README.md](../README.md), which is the operator/system doc
 - [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md), which covers only the remote CUDA training move
 
 ## 1. Executive summary
@@ -426,5 +426,5 @@ That story keeps the main conclusion on held-out validation evidence while still
 
 ## 11. Related project documents
 
-- [README.md](README.md): how to run and monitor the system
+- [README.md](../README.md): how to run and monitor the system
 - [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md): why only the training stage moved to rented GPUs and how that move stays scientifically clean
