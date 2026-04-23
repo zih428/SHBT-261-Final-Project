@@ -745,6 +745,121 @@ def build_qualitative_figure() -> None:
     plt.close(fig)
 
 
+def build_failure_figure() -> None:
+    zero_path = (
+        FINALISTS_DIR
+        / "qwen2-5-vl-3b-instruct-short-answer-validation-mps-tuned-v1"
+        / "predictions.jsonl"
+    )
+    tuned_path = (
+        TRAINED_EVAL_DIR
+        / "qwen2-5-vl-3b-instruct-all-linear-r16-seed13-train-speed-v3-validation-cuda-runpod-v1"
+        / "predictions.jsonl"
+    )
+
+    manifest = load_prediction_map(VAL_MANIFEST)
+    zero = load_prediction_map(zero_path)
+    tuned = load_prediction_map(tuned_path)
+
+    case_specs = [
+        ("34608", "Visual time reading"),
+        ("34718", "OCR ignored"),
+        ("34963", "Partial long answer"),
+        ("35120", "Wrong visual target"),
+    ]
+    selected = []
+    for sample_id, failure_mode in case_specs:
+        base_rec = manifest[sample_id]
+        zero_rec = zero[sample_id]
+        tuned_rec = tuned[sample_id]
+        ocr_tokens = base_rec.get("ocr_tokens") or []
+        selected.append(
+            {
+                "sample_id": sample_id,
+                "mode": failure_mode,
+                "question": base_rec["question"],
+                "answers": base_rec["answers"],
+                "image": REPO_ROOT / base_rec["image"],
+                "ocr": ", ".join(str(token) for token in ocr_tokens[:10]) or "N/A",
+                "zero_prediction": zero_rec.get("prediction", ""),
+                "tuned_prediction": tuned_rec.get("prediction", ""),
+            }
+        )
+
+    fig, axes = plt.subplots(
+        2,
+        4,
+        figsize=(9.6, 7.3),
+        gridspec_kw={"width_ratios": [0.9, 1.25, 0.9, 1.25]},
+    )
+    for index, rec in enumerate(selected):
+        row = index // 2
+        col = (index % 2) * 2
+        ax_img = axes[row, col]
+        ax_txt = axes[row, col + 1]
+        image = Image.open(rec["image"]).convert("RGB")
+        ax_img.imshow(image)
+        ax_img.axis("off")
+        ax_img.set_title(str(rec["mode"]), fontsize=11.5, loc="left", color=COLOR_GRAY)
+
+        ax_txt.axis("off")
+        ax_txt.text(
+            0.0,
+            0.98,
+            wrap(str(rec["question"]), 28),
+            fontsize=10.4,
+            fontweight="bold",
+            va="top",
+        )
+        ax_txt.text(
+            0.0,
+            0.72,
+            f"Gold: {wrap(str(rec['answers'][0]), 25)}",
+            fontsize=9.5,
+            va="top",
+        )
+        ax_txt.text(
+            0.0,
+            0.56,
+            f"OCR: {wrap(str(rec['ocr']), 30)}",
+            fontsize=8.8,
+            color=COLOR_GRAY,
+            va="top",
+        )
+        ax_txt.text(
+            0.0,
+            0.29,
+            f"Zero-shot: {wrap(str(rec['zero_prediction']), 28)}",
+            fontsize=9.3,
+            va="top",
+            color="#7a1f1f",
+        )
+        ax_txt.text(
+            0.0,
+            0.13,
+            f"Tuned: {wrap(str(rec['tuned_prediction']), 28)}",
+            fontsize=9.3,
+            va="top",
+            color="#4a148c",
+        )
+
+    fig.suptitle(
+        "Residual validation failures after LoRA adaptation",
+        fontsize=13,
+        y=0.98,
+    )
+    fig.subplots_adjust(
+        left=0.02,
+        right=0.995,
+        top=0.87,
+        bottom=0.04,
+        wspace=0.26,
+        hspace=0.31,
+    )
+    fig.savefig(FIGURES_DIR / "failure_examples.png", dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
 def build_split_audit_table() -> None:
     internal_dev = load_jsonl(INTERNAL_DEV_MANIFEST)
     train_remainder = load_jsonl(TRAIN_REMAINDER_MANIFEST)
@@ -1083,6 +1198,7 @@ def main() -> None:
     build_screening_heatmap(screening)
     build_adaptation_summary(finalists, trained)
     build_qualitative_figure()
+    build_failure_figure()
     build_tables(screening, finalists, appendix, trained)
 
 
