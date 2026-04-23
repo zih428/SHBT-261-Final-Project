@@ -528,14 +528,14 @@ def build_adaptation_summary(finalists: list[EvalRow], trained: list[dict[str, o
     tuned_val = next(row for row in trained if row["slug"] == "all-linear-r16-seed13" and row["split"] == "validation")
     tuned_internal = [row for row in trained if row["split"] == "internal-dev"]
 
-    fig = plt.figure(figsize=(14.4, 4.9))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.75, 1.15])
+    fig = plt.figure(figsize=(14.8, 5.1))
+    gs = fig.add_gridspec(1, 3, width_ratios=[0.95, 1.65, 1.28])
     ax0 = fig.add_subplot(gs[0, 0])
     ax1 = fig.add_subplot(gs[0, 1])
     ax2 = fig.add_subplot(gs[0, 2])
 
     # Panel A: headline validation gain.
-    labels = ["Zero-shot finalist\n(Qwen short-answer)", "Tuned winner\n(All-linear r16, seed 13)"]
+    labels = ["Zero-shot\nQwen", "Tuned\nLoRA"]
     values = [finalist.metrics["accuracy"], tuned_val["metrics"]["accuracy"]]
     ci_lowers = [
         finalist.metrics["accuracy"] - finalist.metrics["accuracy_ci95"]["lower"],
@@ -587,7 +587,7 @@ def build_adaptation_summary(finalists: list[EvalRow], trained: list[dict[str, o
     finalist_breakdown = load_json(finalist.path / "breakdowns.json")["answer_in_ocr"]
     tuned_breakdown = load_json(tuned_val["path"] / "breakdowns.json")["answer_in_ocr"]
     bucket_order = ["absent", "direct", "normalized_only"]
-    bucket_labels = ["Absent from OCR", "Direct OCR match", "Normalized OCR match"]
+    bucket_labels = ["Absent", "Direct match", "Norm. match"]
     finalist_values = [finalist_breakdown[key]["accuracy"] for key in bucket_order]
     tuned_values = [tuned_breakdown[key]["accuracy"] for key in bucket_order]
     y_positions = [2, 1, 0]
@@ -599,6 +599,7 @@ def build_adaptation_summary(finalists: list[EvalRow], trained: list[dict[str, o
         color=COLOR_BLUE,
         alpha=0.92,
         label="Zero-shot finalist",
+        zorder=2,
     )
     ax2.barh(
         [y - bar_height / 2 for y in y_positions],
@@ -607,14 +608,16 @@ def build_adaptation_summary(finalists: list[EvalRow], trained: list[dict[str, o
         color=COLOR_PURPLE,
         alpha=0.92,
         label="Tuned winner",
+        zorder=2,
     )
-    ax2.set_xlim(0.70, 0.95)
+    ax2.set_xlim(0.68, 0.97)
     ax2.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
     ax2.set_yticks(y_positions)
     ax2.set_yticklabels(bucket_labels, fontsize=9)
-    ax2.legend(loc="lower right", frameon=False, fontsize=8)
-    ax2.set_title("Validation accuracy by OCR answer bucket", fontsize=12)
-    ax2.grid(axis="x", color="#ededed", linewidth=0.8)
+    ax2.tick_params(axis="y", pad=4)
+    ax2.legend(loc="upper right", frameon=False, fontsize=8)
+    ax2.set_title("Validation by OCR bucket", fontsize=12)
+    ax2.grid(axis="x", color="#ededed", linewidth=0.8, zorder=1)
     for y_pos, f_value, t_value in zip(y_positions, finalist_values, tuned_values):
         ax2.text(f_value + 0.003, y_pos + bar_height / 2, f"{100 * f_value:.1f}", va="center", fontsize=7.5)
         ax2.text(t_value + 0.003, y_pos - bar_height / 2, f"{100 * t_value:.1f}", va="center", fontsize=7.5)
@@ -624,7 +627,7 @@ def build_adaptation_summary(finalists: list[EvalRow], trained: list[dict[str, o
         fontsize=13,
         y=0.98,
     )
-    fig.subplots_adjust(left=0.055, right=0.995, top=0.84, bottom=0.13, wspace=0.44)
+    fig.subplots_adjust(left=0.055, right=0.995, top=0.84, bottom=0.13, wspace=0.56)
     fig.savefig(FIGURES_DIR / "adaptation_summary.png", dpi=220, bbox_inches="tight")
     plt.close(fig)
 
