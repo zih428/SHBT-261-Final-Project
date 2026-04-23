@@ -13,6 +13,7 @@ from statistics import mean
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import matplotlib.patheffects as path_effects
 from matplotlib import patches
 from PIL import Image
 
@@ -287,11 +288,10 @@ def trained_group(slug: str) -> str:
 
 def maybe_compute_meteor(predictions_path: Path) -> float | None:
     try:
-        import nltk
+        from nltk.corpus import wordnet as wn
         from nltk.translate.meteor_score import meteor_score
 
-        nltk.download("wordnet", quiet=True)
-        nltk.download("omw-1.4", quiet=True)
+        wn.synsets("text")
     except Exception:
         return None
 
@@ -365,6 +365,39 @@ def percentage(value: float | None) -> str:
 
 def percentage_ci(value: float, ci: dict[str, float]) -> str:
     return f"{100 * value:.2f} [{100 * ci['lower']:.2f}, {100 * ci['upper']:.2f}]"
+
+
+def latex_bold(text: str) -> str:
+    return f"\\textbf{{{text}}}"
+
+
+def is_best(value: float | None, best: float | None) -> bool:
+    return value is not None and best is not None and math.isclose(value, best, rel_tol=0.0, abs_tol=1e-12)
+
+
+def best_max(rows: list[dict[str, object]], key: str) -> float | None:
+    values = [float(row[key]) for row in rows if row.get(key) is not None]
+    return max(values) if values else None
+
+
+def best_min(rows: list[dict[str, object]], key: str) -> float | None:
+    values = [float(row[key]) for row in rows if row.get(key) is not None]
+    return min(values) if values else None
+
+
+def percentage_best(value: float | None, best: float | None) -> str:
+    rendered = percentage(value)
+    return latex_bold(rendered) if is_best(value, best) else rendered
+
+
+def percentage_ci_best(value: float, ci: dict[str, float], best: float | None) -> str:
+    rendered = percentage_ci(value, ci)
+    return latex_bold(rendered) if is_best(value, best) else rendered
+
+
+def decimal_best(value: float | None, best: float | None) -> str:
+    rendered = "--" if value is None else f"{value:.4f}"
+    return latex_bold(rendered) if is_best(value, best) else rendered
 
 
 def write_csv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
@@ -461,11 +494,24 @@ def build_screening_heatmap(screening: list[EvalRow]) -> None:
     ax.set_yticks(range(len(BACKBONE_ORDER)))
     ax.set_yticklabels(BACKBONE_ORDER, fontsize=10)
     ax.set_title("Internal-dev screening accuracy across backbones and OCR-sensitive prompts", fontsize=13, pad=10)
+    best_value = max(value for row in matrix for value in row if not math.isnan(value))
     for i, backbone in enumerate(BACKBONE_ORDER):
         for j, prompt in enumerate(PROMPT_ORDER):
             value = matrix[i][j]
             text = "--" if math.isnan(value) else f"{100 * value:.1f}"
-            ax.text(j, i, text, ha="center", va="center", fontsize=9, color="black")
+            dark_cell = not math.isnan(value) and value >= 0.45
+            label = ax.text(
+                j,
+                i,
+                text,
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontweight="bold" if is_best(value, best_value) else "normal",
+                color="white" if dark_cell else "black",
+            )
+            if dark_cell:
+                label.set_path_effects([path_effects.withStroke(linewidth=1.2, foreground="#172033")])
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
     cbar.ax.set_ylabel("Accuracy (%)", rotation=90)
     cbar.ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
@@ -756,6 +802,11 @@ def build_validation_support_tables(finalist: EvalRow, tuned_val: dict[str, obje
     stats = paired_validation_statistics(finalist, tuned_val)
     write_text(DATA_DIR / "validation_significance.json", json.dumps(stats, indent=2))
 
+    finalist_judge = maybe_load_judge_similarity(finalist.path)
+    tuned_judge = maybe_load_judge_similarity(Path(tuned_val["path"]))
+    best_accuracy = max(float(finalist.metrics["accuracy"]), float(tuned_val["metrics"]["accuracy"]))
+    best_consensus = max(float(finalist.metrics["consensus_accuracy"]), float(tuned_val["metrics"]["consensus_accuracy"]))
+    best_judge = max(value for value in (finalist_judge, tuned_judge) if value is not None)
     with (TABLES_DIR / "validation_headline_table.tex").open("w") as fh:
         fh.write("\\begin{tabular}{lccc}\n")
         fh.write("\\toprule\n")
@@ -763,15 +814,15 @@ def build_validation_support_tables(finalist: EvalRow, tuned_val: dict[str, obje
         fh.write("\\midrule\n")
         fh.write(
             "Zero-shot Qwen finalist & "
-            f"{percentage_ci(finalist.metrics['accuracy'], finalist.metrics['accuracy_ci95'])} & "
-            f"{percentage(finalist.metrics['consensus_accuracy'])} & "
-            f"{percentage(maybe_load_judge_similarity(finalist.path))}\\\\\n"
+            f"{percentage_ci_best(finalist.metrics['accuracy'], finalist.metrics['accuracy_ci95'], best_accuracy)} & "
+            f"{percentage_best(finalist.metrics['consensus_accuracy'], best_consensus)} & "
+            f"{percentage_best(finalist_judge, best_judge)}\\\\\n"
         )
         fh.write(
             "Tuned Qwen LoRA & "
-            f"{percentage_ci(tuned_val['metrics']['accuracy'], tuned_val['metrics']['accuracy_ci95'])} & "
-            f"{percentage(tuned_val['metrics']['consensus_accuracy'])} & "
-            f"{percentage(maybe_load_judge_similarity(Path(tuned_val['path'])))}\\\\\n"
+            f"{percentage_ci_best(tuned_val['metrics']['accuracy'], tuned_val['metrics']['accuracy_ci95'], best_accuracy)} & "
+            f"{percentage_best(tuned_val['metrics']['consensus_accuracy'], best_consensus)} & "
+            f"{percentage_best(tuned_judge, best_judge)}\\\\\n"
         )
         fh.write("\\midrule\n")
         gain_ci = stats["paired_gain_ci95"]
@@ -822,10 +873,12 @@ def build_validation_support_tables(finalist: EvalRow, tuned_val: dict[str, obje
         fh.write("\\toprule\n")
         fh.write("Question prefix & Count & Zero-shot & Tuned & Gain\\\\\n")
         fh.write("\\midrule\n")
+        best_gain = best_max(rows, "gain")
         for row in rows:
+            best_row_accuracy = max(float(row["zero_accuracy"]), float(row["tuned_accuracy"]))
             fh.write(
-                f"{latex_escape(row['prefix'])} & {row['count']} & {percentage(row['zero_accuracy'])} & "
-                f"{percentage(row['tuned_accuracy'])} & {percentage(row['gain'])}\\\\\n"
+                f"{latex_escape(row['prefix'])} & {row['count']} & {percentage_best(row['zero_accuracy'], best_row_accuracy)} & "
+                f"{percentage_best(row['tuned_accuracy'], best_row_accuracy)} & {percentage_best(row['gain'], best_gain)}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
@@ -911,6 +964,11 @@ def build_tables(
         ["stage", "model", "setting", "split", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge"],
     )
 
+    main_validation_rows = [row for row in main_rows if row["split"] == "validation"]
+    main_bests = {
+        key: best_max(main_validation_rows, key)
+        for key in ("accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge")
+    }
     with (TABLES_DIR / "main_results_table.tex").open("w") as fh:
         fh.write("\\begin{tabular}{llccccccc}\n")
         fh.write("\\toprule\n")
@@ -918,9 +976,12 @@ def build_tables(
         fh.write("\\midrule\n")
         for row in main_rows:
             label = f"{row['model']} ({row['setting']})"
+            comparable_best = main_bests if row["split"] == "validation" else {}
             fh.write(
-                f"{latex_escape(row['stage'])} & {latex_escape(label)} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
-                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
+                f"{latex_escape(row['stage'])} & {latex_escape(label)} & {percentage_best(row['accuracy'], comparable_best.get('accuracy'))} & "
+                f"{percentage_best(row['consensus_accuracy'], comparable_best.get('consensus_accuracy'))} & {percentage_best(row['f1'], comparable_best.get('f1'))} & "
+                f"{percentage_best(row['bleu'], comparable_best.get('bleu'))} & {percentage_best(row['meteor'], comparable_best.get('meteor'))} & "
+                f"{percentage_best(row['rouge_l'], comparable_best.get('rouge_l'))} & {percentage_best(row['judge'], comparable_best.get('judge'))}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
@@ -947,6 +1008,13 @@ def build_tables(
         trained_rows_csv,
         ["group", "configuration", "eval_loss", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge"],
     )
+    trained_bests = {
+        "eval_loss": best_min(trained_rows_csv, "eval_loss"),
+        **{
+            key: best_max(trained_rows_csv, key)
+            for key in ("accuracy", "consensus_accuracy", "f1", "meteor", "rouge_l", "judge")
+        },
+    }
     with (TABLES_DIR / "trained_adapter_table.tex").open("w") as fh:
         fh.write("\\begin{tabular}{llccccccc}\n")
         fh.write("\\toprule\n")
@@ -954,8 +1022,10 @@ def build_tables(
         fh.write("\\midrule\n")
         for row in trained_rows_csv:
             fh.write(
-                f"{latex_escape(row['group'])} & {latex_escape(row['configuration'])} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & "
-                f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
+                f"{latex_escape(row['group'])} & {latex_escape(row['configuration'])} & {decimal_best(row['eval_loss'], trained_bests['eval_loss'])} & "
+                f"{percentage_best(row['accuracy'], trained_bests['accuracy'])} & {percentage_best(row['consensus_accuracy'], trained_bests['consensus_accuracy'])} & "
+                f"{percentage_best(row['f1'], trained_bests['f1'])} & {percentage_best(row['meteor'], trained_bests['meteor'])} & "
+                f"{percentage_best(row['rouge_l'], trained_bests['rouge_l'])} & {percentage_best(row['judge'], trained_bests['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")
@@ -980,6 +1050,10 @@ def build_tables(
         appendix_rows_csv,
         ["branch", "setting", "accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge"],
     )
+    appendix_bests = {
+        key: best_max(appendix_rows_csv, key)
+        for key in ("accuracy", "consensus_accuracy", "f1", "bleu", "meteor", "rouge_l", "judge")
+    }
     with (TABLES_DIR / "appendix_results_table.tex").open("w") as fh:
         fh.write("\\begin{tabular}{llccccccc}\n")
         fh.write("\\toprule\n")
@@ -987,8 +1061,10 @@ def build_tables(
         fh.write("\\midrule\n")
         for row in appendix_rows_csv:
             fh.write(
-                f"{latex_escape(row['branch'])} & {latex_escape(row['setting'])} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
-                f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
+                f"{latex_escape(row['branch'])} & {latex_escape(row['setting'])} & {percentage_best(row['accuracy'], appendix_bests['accuracy'])} & "
+                f"{percentage_best(row['consensus_accuracy'], appendix_bests['consensus_accuracy'])} & {percentage_best(row['f1'], appendix_bests['f1'])} & "
+                f"{percentage_best(row['bleu'], appendix_bests['bleu'])} & {percentage_best(row['meteor'], appendix_bests['meteor'])} & "
+                f"{percentage_best(row['rouge_l'], appendix_bests['rouge_l'])} & {percentage_best(row['judge'], appendix_bests['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
         fh.write("\\end{tabular}\n")

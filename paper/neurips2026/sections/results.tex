@@ -18,7 +18,7 @@ The finalist stage confirms that the screening winner transfers to the official 
     \centering
     \small
     \resizebox{\textwidth}{!}{\input{generated/tables/main_results_table.tex}}
-    \caption{Main benchmark results. The table reports the best internal-dev screening configuration for each backbone, all promoted validation finalists, and the final tuned model. Exact-match accuracy is the primary score; consensus accuracy, F1, BLEU, METEOR, ROUGE-L, and judge similarity provide secondary semantic context. The tuned Qwen adapter becomes the strongest overall validation system.}
+    \caption{Main benchmark results. The table reports the best internal-dev screening configuration for each backbone, all promoted validation finalists, and the final tuned model. Exact-match accuracy is the primary score; consensus accuracy, F1, BLEU, METEOR, ROUGE-L, and judge similarity provide secondary semantic context. Bold entries mark the best value among validation-facing rows only; the internal-dev screening rows are not bolded against validation rows.}
     \label{tab:main-results}
 \end{table*}
 
@@ -30,7 +30,7 @@ The adaptation stage improves the official validation result, not only the inter
     \centering
     \small
     \input{generated/tables/validation_headline_table.tex}
-    \caption{Official validation headline comparison. The paired gain is computed over the same 5,000 validation questions and is therefore a stronger test than comparing independent intervals alone.}
+    \caption{Official validation headline comparison. Bold entries mark the stronger system-level metric. The paired gain is computed over the same 5,000 validation questions and is therefore a stronger test than comparing independent intervals alone.}
     \label{tab:validation-headline}
 \end{table}
 
@@ -53,7 +53,7 @@ The follow-up runs sharpen the interpretation of the core matrix rather than mer
     \centering
     \small
     \resizebox{\textwidth}{!}{\input{generated/tables/trained_adapter_table.tex}}
-    \caption{Post-train internal-dev results for the full LoRA study. Core-matrix rows compare target strategy, rank, and seed. Follow-up rows inherit the winner-conditioned family and probe OCR conditioning or data scaling. The table makes the distinction between training-stage \texttt{eval\_loss}, exact-match accuracy, and semantic judge similarity explicit.}
+    \caption{Post-train internal-dev results for the full LoRA study. Core-matrix rows compare target strategy, rank, and seed. Follow-up rows inherit the winner-conditioned family and probe OCR conditioning or data scaling. Bold entries mark the best metric value in the table, with lower being better for \texttt{eval\_loss}.}
     \label{tab:trained-adapters}
 \end{table*}
 
@@ -65,6 +65,6 @@ The appendix branch strengthens the analysis without altering the main winner-se
     \centering
     \small
     \resizebox{\textwidth}{!}{\input{generated/tables/appendix_results_table.tex}}
-    \caption{Validation robustness results from the appendix branch. These runs are intentionally secondary to the main funnel and are used to probe prompt-routing and decoding sensitivity without changing the core winner-selection logic. Judge similarity is reported alongside the benchmark-native metrics to show whether robustness conclusions persist under a more semantically tolerant evaluator.}
+    \caption{Validation robustness results from the appendix branch. These runs are intentionally secondary to the main funnel and are used to probe prompt-routing and decoding sensitivity without changing the core winner-selection logic. Bold entries mark the best value in each metric column.}
     \label{tab:appendix-results}
 \end{table*}
