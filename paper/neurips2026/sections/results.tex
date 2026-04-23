@@ -12,7 +12,7 @@ The internal-dev screening matrix immediately separates backbone quality from pr
     \label{fig:screening-heatmap}
 \end{figure*}
 
-The finalist stage confirms that the screening winner is not an artifact of the internal-dev split. Table~\ref{tab:main-results} shows that the four promoted Qwen settings occupy the top four validation positions, led again by \texttt{short\_answer} at 78.72\% accuracy and 89.09\% judge similarity. The strongest non-Qwen finalist, LLaVA-Phi-3-mini with OCR-normalized prompting, reaches only 50.36\% exact-match accuracy, leaving a 28.36-point gap to the best Qwen finalist. This margin is too large to interpret as prompt noise. Instead, it indicates that under the current evaluation boundary, backbone quality dominates the ranking and that OCR-aware prompting changes ordering within a family more than it changes ordering across families.
+The finalist stage confirms that the screening winner transfers to the official validation split. Table~\ref{tab:main-results} shows that the four promoted Qwen settings occupy the top four validation positions, led again by \texttt{short\_answer} at 78.72\% accuracy and 89.09\% judge similarity. The strongest non-Qwen finalist, LLaVA-Phi-3-mini with OCR-normalized prompting, reaches only 50.36\% exact-match accuracy, leaving a 28.36-point gap to the best Qwen finalist. This margin is large relative to the within-family prompt differences, so under the current evaluation boundary the main zero-shot ranking is better explained by backbone quality than by any single OCR-aware prompt variant.
 
 \begin{table*}[t]
     \centering
@@ -24,11 +24,19 @@ The finalist stage confirms that the screening winner is not an artifact of the 
 
 \subsection{Winner-conditioned LoRA adaptation}
 
-The adaptation stage delivers a real validation gain rather than a cosmetic retuning of the zero-shot winner. Figure~\ref{fig:adaptation-summary} reports the headline comparison: the final tuned model, \texttt{all-linear-r16-seed13}, reaches 84.76\% validation accuracy, compared with 78.72\% for the strongest zero-shot finalist, for an absolute improvement of 6.04 points. The same comparison also improves consensus accuracy by 5.95 points, F1 by 4.50 points, and ROUGE-L by 4.11 points. The 95\% confidence intervals for the two validation accuracies do not overlap, which makes the gain difficult to dismiss as evaluation noise.
+The adaptation stage improves the official validation result, not only the internal diagnostic split. Figure~\ref{fig:adaptation-summary} reports the headline comparison: the final tuned model, \texttt{all-linear-r16-seed13}, reaches 84.76\% validation accuracy, compared with 78.72\% for the strongest zero-shot finalist, for an absolute improvement of 6.04 points. The same comparison also improves consensus accuracy by 5.95 points, F1 by 4.50 points, and ROUGE-L by 4.11 points. Because both systems are evaluated on the same 5,000 validation questions, we also run a paired bootstrap over examples. The paired 95\% confidence interval for the accuracy gain is $[5.00, 7.04]$ points, and an exact McNemar test on the discordant decisions gives $p=1.97\times10^{-32}$.
+
+\begin{table}[t]
+    \centering
+    \small
+    \input{generated/tables/validation_headline_table.tex}
+    \caption{Official validation headline comparison. The paired gain is computed over the same 5,000 validation questions and is therefore a stronger test than comparing independent intervals alone.}
+    \label{tab:validation-headline}
+\end{table}
 
 The semantic judge agrees with the direction of the exact-match result while tightening its interpretation. In Table~\ref{tab:main-results}, the strongest zero-shot finalist reaches 89.09\% judge similarity, whereas the tuned winner reaches 91.24\%, a gain of 2.15 points. This gap is smaller than the exact-match improvement, which is exactly the pattern we would expect if part of the tuned model's advantage comes from stricter normalization and answer-format control rather than from a wholesale change in semantic competence. In other words, the judge score does not erase the tuning gain; it refines it into a more conservative but still positive semantic improvement.
 
-The internal-dev adapter sweep in Figure~\ref{fig:adaptation-summary} and Table~\ref{tab:trained-adapters} also reveals an important methodological distinction. Training-stage family selection chose \texttt{all-linear-r32} as the winner-conditioned follow-up family because it had the lowest mean internal-dev \texttt{eval\_loss} across seeds. However, the highest post-train internal-dev accuracy among the completed core adapters came from \texttt{all-linear-r16-seed13} at 88.45\%. This is not a contradiction; it is evidence that training loss is a useful control signal for allocating follow-up budget, but not a perfect substitute for the paper-facing metric of answer accuracy. The separation between family selection and final model promotion is therefore justified empirically, not just procedurally.
+The internal-dev adapter sweep in Figure~\ref{fig:adaptation-summary} and Table~\ref{tab:trained-adapters} also reveals why the selection policy separates training loss from answer accuracy. Mean internal-dev \texttt{eval\_loss} selected the \texttt{all-linear-r32} family for the follow-up OCR and scaling diagnostics, but the highest post-train internal-dev answer accuracy among the completed core adapters came from \texttt{all-linear-r16-seed13} at 88.45\%. This is not a conflict between two winners; it is a distinction between two roles. Loss is used to allocate limited follow-up training budget, while answer accuracy selects the adapter promoted to official validation.
 
 \begin{figure*}[t]
     \centering
@@ -39,7 +47,7 @@ The internal-dev adapter sweep in Figure~\ref{fig:adaptation-summary} and Table~
 
 Seed stability in the core matrix is also stronger than the raw leaderboard might suggest. Averaging the two seeds within each family, \texttt{all-linear-r16} reaches 87.95\% internal-dev accuracy, compared with 87.63\% for \texttt{all-linear-r32}, 87.63\% for \texttt{attn-r16}, and 87.43\% for \texttt{attn-r32}. More importantly, the seed ranges are small: 1.00 point for \texttt{all-linear-r16}, 0.15 for \texttt{all-linear-r32}, 0.05 for \texttt{attn-r16}, and 0.25 for \texttt{attn-r32}. The study therefore does not hinge on a single anomalous seed.
 
-The follow-up runs sharpen the interpretation of the core matrix rather than merely extending it. The OCR ablation pair differs by only 0.10 internal-dev accuracy points (87.65\% without OCR conditioning versus 87.55\% with OCR conditioning), suggesting that once the model is adapted, explicit OCR toggling matters less than it did in zero-shot prompting. The data-scaling pair is more informative: moving from the 25 pct setting to the full training-remainder run raises internal-dev accuracy from 87.60\% to 87.90\%. This gain is modest, but directionally consistent with the training-stage \texttt{eval\_loss} improvement and supports the choice to spend the final training budget on the full-data configuration.
+The follow-up runs sharpen the interpretation of the core matrix rather than merely extending it. The OCR ablation pair differs by only 0.10 internal-dev accuracy points (87.65\% without OCR conditioning versus 87.55\% with OCR conditioning), suggesting that once the model is adapted, explicit OCR toggling matters less than it did in zero-shot prompting. The data-scaling pair is more informative: moving from the 25\% setting to the full training-remainder run raises internal-dev accuracy from 87.60\% to 87.90\%. This gain is modest and diagnostic; it suggests that additional data remains useful for the selected follow-up family, but it is not used to override the accuracy-based validation promotion rule.
 
 \begin{table*}[t]
     \centering

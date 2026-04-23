@@ -5,8 +5,11 @@
 .coverage
 coverage.xml
 .venv/
+.local_notes/
 __pycache__/
 *.py[cod]
+*.pid
+*.lock
 
 data/raw/
 data/cache/

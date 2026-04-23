@@ -1,0 +1,21 @@
+{
+  "n": 5000,
+  "zero_accuracy": 0.7872,
+  "zero_accuracy_ci95": {
+    "lower": 0.776,
+    "upper": 0.7988
+  },
+  "tuned_accuracy": 0.8476,
+  "tuned_accuracy_ci95": {
+    "lower": 0.8386,
+    "upper": 0.8576
+  },
+  "paired_gain": 0.0604,
+  "paired_gain_ci95": {
+    "lower": 0.05,
+    "upper": 0.0704
+  },
+  "mcnemar_zero_correct_tuned_wrong": 183,
+  "mcnemar_zero_wrong_tuned_correct": 485,
+  "mcnemar_p": 1.9651082195469694e-32
+}

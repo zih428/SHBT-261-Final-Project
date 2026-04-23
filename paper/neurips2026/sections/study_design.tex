@@ -10,24 +10,25 @@
 
 \subsection{Task and data protocol}
 
-The study follows the official TextVQA split structure of approximately $34.6$k training examples, $5$k validation examples, and $5.73$k test examples \citep{singh2019textvqa}. We reserve the official validation split for finalist reruns, appendix experiments, and final tuned-model checks. To avoid exhausting this split during exploratory screening, we materialize a separate $2{,}000$-example internal development set from the training split. This internal-dev set is stratified rather than sampled naively, with explicit control over question prefix, answer-length bucket, and OCR-token-count bucket. The remaining training examples form the training pool for the LoRA study.
+The study follows the official TextVQA split structure of approximately $34.6$k training examples, $5$k validation examples, and $5.73$k test examples \citep{singh2019textvqa}. We reserve the official validation split for finalist reruns, appendix experiments, and final tuned-model checks. Because public labels for the official test split are not available in the local dataset release used by this project, all paper-facing final claims are made on the official validation split. To avoid using that validation split for broad exploratory screening, we materialize a separate $2{,}000$-question internal development set from the training split. This internal-dev set is stratified rather than sampled naively, with explicit control over question prefix, answer-length bucket, and OCR-token-count bucket. The remaining training questions form the training pool for the LoRA study.
 
-This split policy serves two methodological goals. First, it allows broad model and prompt exploration without implicitly overfitting the official validation set. Second, it makes the final validation comparisons more meaningful, because they are reserved for a shortlist that has already survived a cheaper but structured screening stage. The protocol therefore trades a small amount of up-front split engineering for a much cleaner evaluation narrative.
+The internal-dev split is question-disjoint from the LoRA training pool, but it is not fully image-disjoint: TextVQA contains multiple questions for some images, and the current split removes selected questions rather than every question attached to the same image. Table~\ref{tab:split-audit} makes this boundary explicit. We therefore treat internal-dev results as screening and diagnostic evidence rather than as independent final test evidence. The final claims in the paper are anchored on the official validation split, and Section~\ref{sec:analysis} reports an overlap sensitivity check to show how much the internal-dev adapter ranking changes when only image-disjoint internal-dev questions are retained.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \input{generated/tables/split_audit_table.tex}
+    \caption{Data-use audit for the current study. Internal-dev is useful for inexpensive screening and adapter diagnostics, but official validation is the final paper-facing evaluation split.}
+    \label{tab:split-audit}
+\end{table*}
+
+This split policy serves two methodological goals. First, it allows broad model and prompt exploration without spending the official validation split on every exploratory setting. Second, it makes the final validation comparisons more meaningful, because they are reserved for a shortlist that has already survived a cheaper but structured screening stage. The protocol therefore trades a small amount of up-front split engineering for a cleaner evidence hierarchy.
 
 \subsection{Model pool and prompt settings}
 
 The canonical zero-shot benchmark pool contains four open-source VLM families and one non-neural OCR lexical baseline. The four reportable VLM families are Qwen2.5-VL-3B \citep{qwen2025qwen25vl}, InternVL2.5-4B \citep{chen2024internvl25}, LLaVA-Phi-3-mini \citep{liu2023visual}, and BLIP-2 OPT-2.7B \citep{li2023blip2}. The OCR lexical baseline is included not as a competitor to modern VLMs, but as a calibration point that helps distinguish genuine multimodal reasoning from question-answer overlap driven by visible text alone.
 
-Each real VLM is screened under six prompt settings:
-\begin{enumerate}[leftmargin=1.5em, itemsep=0.2em]
-    \item \texttt{plain},
-    \item \texttt{short\_answer},
-    \item \texttt{ocr\_copy\_first},
-    \item \texttt{ocr\_injected},
-    \item \texttt{ocr\_injected\_normalized},
-    \item \texttt{ocr\_fused}.
-\end{enumerate}
-This yields $24$ real VLM screening runs ($4$ backbones $\times$ $6$ settings) plus $6$ OCR-baseline runs. The design deliberately treats OCR prompting as a first-class variable, because TextVQA performance is often determined as much by how text is exposed to the model as by which backbone is chosen.
+Each real VLM is screened under six prompt settings: \texttt{plain}, \texttt{short\_answer}, \texttt{ocr\_copy\_first}, \texttt{ocr\_injected}, \texttt{ocr\_injected\_normalized}, and \texttt{ocr\_fused}. This yields $24$ real VLM screening runs ($4$ backbones $\times$ $6$ settings) plus $6$ OCR-baseline runs. The design deliberately treats OCR prompting as a first-class variable, because TextVQA performance is often determined as much by how text is exposed to the model as by which backbone is chosen.
 
 \subsection{Funnel evaluation protocol}
 
@@ -39,12 +40,36 @@ This funnel design is central to the paper's methodology. It prevents the study 
 
 The adaptation path in this project is LoRA fine-tuning on Qwen2.5-VL-3B. The training study has twelve runs in total. The core matrix contains eight runs spanning two target-module strategies, two ranks, and two random seeds. Concretely, it compares attention-only versus all-linear target sets and rank $16$ versus $32$, with seed replication to estimate whether observed differences are stable or fragile.
 
-The remaining four runs are follow-ups conditioned on the completed core matrix rather than fixed in advance to an arbitrary default family. The first pair is an OCR-conditioning ablation that toggles OCR on and off while holding the selected LoRA family fixed. The second pair is a data-scaling comparison between a smaller fixed-budget subset and the full training-remainder pool. Training-stage winner selection is based on mean internal-dev \texttt{eval\_loss} across both seeds within a family, with the best-seed run used as the representative configuration for writing the winner-conditioned override. Post-training model promotion is handled separately: once trained adapters are evaluated on internal-dev for answer accuracy, only the final tuned winner, or a very small shortlist, is promoted to official validation.
+The remaining four runs are follow-ups conditioned on the completed core matrix rather than fixed in advance to an arbitrary default family. The first pair is an OCR-conditioning ablation that toggles OCR on and off while holding the selected LoRA family fixed. The second pair is a data-scaling comparison between a smaller fixed-budget subset and the full training-remainder pool. We deliberately separate three decisions that are easy to conflate. Mean internal-dev \texttt{eval\_loss} across the two seeds is used only as a budget-allocation signal for choosing which LoRA family receives follow-up OCR and scaling runs. Internal-dev answer accuracy is then used to choose the single trained adapter promoted to official validation. The paper-facing final claim is made only after that adapter is evaluated on the official validation split.
 
-This separation between training-stage family selection and post-training accuracy-based promotion is intentional. The former is a control mechanism for deciding which family should receive follow-up training budget, while the latter is the paper-facing decision rule for selecting the tuned model that deserves final validation evidence. Keeping these roles distinct makes the adaptation study easier to defend and prevents the follow-up phase from being attached to a family that won only by default.
+This separation between training-stage loss, internal-dev accuracy, and official-validation accuracy is intentional. The first is a control signal for allocating follow-up training budget, the second is a local promotion rule, and the third is the final evaluation criterion. Keeping these roles distinct makes the adaptation study easier to interpret and prevents diagnostic follow-ups from being mistaken for the final model-selection evidence.
+
+\begin{table*}[t]
+    \centering
+    \small
+    \begin{tabular}{ll}
+        \toprule
+        Component & Setting \\
+        \midrule
+        Backbone & Qwen/Qwen2.5-VL-3B-Instruct \\
+        Training dtype / device & bfloat16 on remote NVIDIA H100 GPUs \\
+        Core training budget & $8{,}192$ training questions, $1.0$ epoch, effective batch size $8$ \\
+        Core learning rates & $2\times 10^{-4}$ for rank $16$; $1.5\times 10^{-4}$ for rank $32$ \\
+        Optimizer schedule & warmup ratio $0.03$, weight decay $0.0$ \\
+        LoRA modules & \texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}, \texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj} \\
+        LoRA regularization & $\alpha=2r$, dropout $0.05$, bias disabled \\
+        Training prompt & \texttt{ocr\_injected\_normalized}, dataset OCR, max $32$ OCR tokens \\
+        Zero-shot finalist prompt & \texttt{short\_answer}, no explicit OCR injection \\
+        \bottomrule
+    \end{tabular}
+    \caption{Key implementation settings for the Qwen LoRA study and the strongest zero-shot finalist. The full run configuration is materialized in the saved \texttt{settings.json} files and layered TOML configs.}
+    \label{tab:hyperparams}
+\end{table*}
 
 \subsection{Metrics, systems boundary, and reproducibility}
 
-The headline metric is exact-match TextVQA accuracy. In addition, we report secondary semantic and overlap metrics that capture partial-answer quality beyond exact string matching, including BLEU \citep{papineni2002bleu}, METEOR \citep{banerjee2005meteor}, ROUGE-L \citep{lin2004rouge}, token-level F1, precision/recall, and an LLM-as-a-Judge similarity score across all paper-reported experiment tables. The judge score is computed post hoc from saved prediction files using GPT-4.1 mini via the OpenAI API \citep{openai2025gpt41} and follows the broader practice of LLM-based semantic adjudication in evaluation pipelines \citep{zheng2023judging}. Each prediction is compared against the original question and the full set of human reference answers and receives a discrete semantic score in $\{0, 0.5, 1\}$, where $1$ denotes semantic equivalence to at least one acceptable answer, $0.5$ denotes a substantial but incomplete near match, and $0$ denotes a semantic mismatch. These metrics do not replace exact-match accuracy, which remains the primary paper-facing score, but they are useful for understanding whether near-miss generations or paraphrastic answers carry signal that exact matching discards.
+The headline metric is exact any-match accuracy after TextVQA-style answer normalization. A prediction receives \texttt{Acc.}=1 if it exactly matches at least one of the ten human reference answers after normalization and 0 otherwise. We also report \texttt{Cons.}, the consensus score $\min(m/3,1)$, where $m$ is the number of normalized human answers that exactly match the prediction. The former is the primary paper-facing score because it directly tracks whether the model produced an acceptable short answer; the latter is included because it preserves the conventional VQA intuition that answers supported by more annotators should receive more credit.
 
-The implementation boundary is equally deliberate. All canonical zero-shot, finalist, and appendix evaluations are executed locally on a single Apple-Silicon workstation with resumable queueing and append-only logs. Only the final LoRA matrix is rerun on remote H100 GPUs, and it is rerun from scratch under a distinct run namespace rather than mixed with earlier local pilot training attempts. This preserves a clean hardware and checkpoint boundary between evaluation evidence and training evidence. Reproducibility is further supported through layered TOML configuration, materialized manifests, resumable training checkpoints, automated progress reporting, and remote multi-GPU orchestration with explicit phase boundaries. The result is an experiment that is not only ambitious in scope, but also inspectable in its operational details.
+In addition, we report secondary semantic and overlap metrics that capture partial-answer quality beyond exact string matching, including BLEU \citep{papineni2002bleu}, METEOR \citep{banerjee2005meteor}, ROUGE-L \citep{lin2004rouge}, token-level F1, precision/recall, and an LLM-as-a-Judge similarity score across all paper-reported experiment tables. The judge score is computed post hoc from saved prediction files using GPT-4.1 mini via the OpenAI API \citep{openai2025gpt41} and follows the broader practice of LLM-based semantic adjudication in evaluation pipelines \citep{zheng2023judging}. Each prediction is compared against the original question and the full set of human reference answers and receives a discrete semantic score in $\{0, 0.5, 1\}$, where $1$ denotes semantic equivalence to at least one acceptable answer, $0.5$ denotes a substantial but incomplete near match, and $0$ denotes a semantic mismatch. The judge score is used only as a secondary diagnostic; it is never used to select the final model or replace the benchmark-native exact metrics.
+
+The implementation boundary is equally deliberate. All canonical zero-shot, finalist, and appendix evaluations are executed locally on a single Apple-Silicon workstation with resumable queueing and append-only logs. The LoRA training matrix and trained-adapter evaluations are run on remote H100 GPUs under a distinct run namespace rather than mixed with earlier local pilot training attempts. This preserves a clean hardware and checkpoint boundary between the local zero-shot/finalist evidence and the remote adaptation evidence. Reproducibility is further supported through layered TOML configuration, materialized manifests, resumable training checkpoints, automated progress reporting, and remote multi-GPU orchestration with explicit phase boundaries. The result is an experiment that is not only ambitious in scope, but also inspectable in its operational details.

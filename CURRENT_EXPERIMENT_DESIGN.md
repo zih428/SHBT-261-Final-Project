@@ -1,6 +1,6 @@
 # Current TextVQA Experiment Design
 
-Date: 2026-04-20
+Date: 2026-04-23
 
 This document is the canonical high-level description of the **current** experiment design for the SHBT 261 TextVQA final project.
 
@@ -14,7 +14,6 @@ It is meant to answer four questions clearly:
 This file is intentionally different from:
 
 - [README.md](README.md), which is the operator/system doc
-- [textvqa_revised_experiment_plan.md](textvqa_revised_experiment_plan.md), which is the earlier planning/rationale document
 - [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md), which covers only the remote CUDA training move
 
 ## 1. Executive summary
@@ -40,8 +39,9 @@ In addition, the repo now contains an **exploratory** MiniGPT-4 adapter plus one
 
 The canonical interpretation of the project is:
 
-- local Apple-Silicon runs remain the canonical completed **evaluation** results
-- the final **training** matrix is being rerun cleanly on rented CUDA hardware
+- local Apple-Silicon runs remain the canonical zero-shot, finalist, and appendix evaluation record
+- the final Qwen LoRA matrix and trained-adapter evals are recorded under a separate remote CUDA namespace
+- internal-dev is used for screening and diagnostics; official validation is the final paper-facing split
 
 ## 1A. End-to-end study flow
 
@@ -55,8 +55,8 @@ Interpretation of the flow:
 
 - Stages `1`, `2`, and `4` are the canonical evaluation record and remain local.
 - Stage `3` is the only part moved to remote CUDA hardware.
-- The `best-assumed-*` follow-ups are not arbitrary extras; they are generated from the completed core training winner family.
-- Post-train adapter evaluation is a separate step after training and uses accuracy-based comparison, while the training-stage winner selection uses `eval_loss`.
+- The `best-assumed-*` follow-ups are diagnostic runs attached to the family selected by mean internal-dev `eval_loss`.
+- Post-train adapter evaluation is a separate step after training. Internal-dev accuracy selects the validation candidate; official validation supplies the final paper-facing score.
 
 ## 1B. Local machine context
 
@@ -144,7 +144,14 @@ The current project design uses the data in this way:
 - a stratified **2,000-example internal-dev split** is materialized from train for cheap screening
 - the remaining training examples become the training pool for the LoRA study
 
-The internal-dev split is stratified to reduce selection noise. The design explicitly accounts for:
+The internal-dev split is question-disjoint from the training pool, but it is not fully image-disjoint because TextVQA can contain multiple questions for one image. The current manifest audit is:
+
+- internal-dev: `2,000` questions, `1,939` images
+- train remainder: `32,602` questions, `21,443` images
+- internal-dev questions whose image also appears in train remainder: `1,429`
+- internal-dev questions whose image is absent from train remainder: `571`
+
+This is acceptable for screening and diagnostics, but final paper claims should be tied to official validation. The internal-dev split is stratified to reduce selection noise. The design explicitly accounts for:
 
 - question prefix
 - answer length
@@ -165,7 +172,7 @@ The **canonical reportable benchmark pool** is intentionally limited to four rea
 
 ### Non-neural lexical baseline
 
-6. `OCR lexical baseline`
+5. `OCR lexical baseline`
 
 The rationale is:
 
@@ -179,7 +186,7 @@ The project currently uses **Qwen2.5-VL-3B** as the training backbone because it
 
 The repo also contains an exploratory `MiniGPT-4 Vicuna-7B` adapter, but it is **not** included in the canonical benchmark or paper-facing winner-selection funnel.
 
-The reason is methodological rather than cosmetic:
+The reason is methodological:
 
 - MiniGPT-4 was added later as an exploratory extension, not as part of the original committed four-backbone matrix.
 - Its upstream stack is less cleanly aligned with the repo's main Hugging Face-first inference path than the four committed backbones.
@@ -213,11 +220,7 @@ This creates:
 
 The separate MiniGPT-4 pilot is outside these canonical counts and does not participate in finalist promotion.
 
-Why this stage exists:
-
-- compare backbones cheaply
-- measure prompt/OCR sensitivity early
-- avoid spending full-validation budget on weak combinations
+Why this stage exists: compare backbones cheaply, measure prompt/OCR sensitivity early, and avoid spending full-validation budget on weak combinations.
 
 ### Finalists
 
@@ -228,11 +231,7 @@ After screening:
 
 That creates `8` full-validation finalist reruns.
 
-Why this stage exists:
-
-- keep the official validation split for serious comparisons
-- avoid overfitting the whole project to the validation set during exploration
-- produce a clean shortlist before training
+Why this stage exists: keep the official validation split for serious comparisons, avoid using it for every exploratory prompt, and produce a clean shortlist before training.
 
 ### Training
 
@@ -251,11 +250,13 @@ The core matrix answers the main adaptation question:
 - rank `16` vs `32`
 - seed stability
 
-The remaining `4` runs are intentionally follow-ups, not part of the first wave. They are selected using the completed core results so that the ablations stay attached to the actual winner family instead of an arbitrary default.
+The remaining `4` runs are intentionally follow-ups, not part of the first wave. They are selected using the completed core results so that the ablations stay attached to a selected family instead of an arbitrary default.
 
 Current canonical training policy:
 
-- rerun the full training matrix under a separate remote run namespace
+- use mean internal-dev `eval_loss` only to allocate follow-up training budget
+- use post-train internal-dev answer accuracy to choose the validation candidate
+- use official validation accuracy as the final paper-facing result
 
 ### Appendix
 
@@ -413,18 +414,17 @@ Those are not the paper’s main claim, but they strengthen credibility and fini
 
 ## 10. Current paper story
 
-The paper can be written around this narrative:
+The paper narrative is:
 
-1. Benchmark a focused but credible set of open VLMs on TextVQA
-2. Show that backbone choice matters more than naive OCR-heavy prompting
-3. Select a winner backbone through a disciplined screening/finalist funnel
-4. Run a structured LoRA study on the winner
-5. Use appendix runs to show which prompt/stress choices are robust and which are brittle
+1. Benchmark a focused but credible set of open VLMs on TextVQA.
+2. Show that Qwen remains the strongest finalist on official validation.
+3. Run a structured LoRA study on Qwen while keeping loss-based follow-up allocation separate from accuracy-based promotion.
+4. Report the tuned-vs-zero-shot gain on official validation with paired confidence intervals.
+5. Use appendix, OCR, answer-length, and question-prefix breakdowns to explain where the gain comes from.
 
-That is a cleaner story than trying to claim "everything matters equally."
+That story keeps the main conclusion on held-out validation evidence while still using internal-dev to support efficient exploration.
 
 ## 11. Related project documents
 
 - [README.md](README.md): how to run and monitor the system
-- [textvqa_revised_experiment_plan.md](textvqa_revised_experiment_plan.md): earlier planning doc with the original rationale and broader scope discussion
 - [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md): why only the training stage moved to rented GPUs and how that move stays scientifically clean

@@ -1,0 +1,9 @@
+\begin{tabular}{lrrp{0.31\linewidth}p{0.22\linewidth}}
+\toprule
+Pool & QA & Images & Image relation & Role\\
+\midrule
+Internal-dev & 2000 & 1939 & 571 image-disjoint QA; 1429 image-overlap QA & Screening/diagnostics\\
+Train remainder & 32602 & 21443 & Question-disjoint from internal-dev & LoRA training pool\\
+Official validation & 5000 & 3166 & Official held-out split & Final paper-facing evaluation\\
+\bottomrule
+\end{tabular}

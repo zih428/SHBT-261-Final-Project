@@ -5,7 +5,6 @@ Resumable, machine-tuned experimentation code for the SHBT 261 TextVQA final pro
 ## Project docs
 
 - [CURRENT_EXPERIMENT_DESIGN.md](CURRENT_EXPERIMENT_DESIGN.md): canonical description of the current experiment design, rationale, requirement mapping, and "above and beyond" scope
-- [textvqa_revised_experiment_plan.md](textvqa_revised_experiment_plan.md): earlier planning doc that explains the original staged funnel and why the project was scoped this way
 - [REMOTE_GPU_TRAINING_PLAN.md](REMOTE_GPU_TRAINING_PLAN.md): focused note on why only the training stage moved to remote CUDA and how that boundary stays scientifically clean
 
 ## Canonical hardware context
@@ -31,7 +30,7 @@ Those specs are the reason the repo is tuned the way it is:
 - Layered TOML configs for data, models, evaluation, and training
 - Resumable evaluation runs with append-only prediction logs
 - Resumable Qwen LoRA training with checkpoint recovery
-- Stratified internal-dev split materialization
+- Stratified internal-dev split materialization plus split-audit reporting
 - External OCR sidecar generation and OCR-fusion prompt support
 - Real VLM adapters for Qwen2.5-VL, BLIP-2, LLaVA-Phi-3-mini, and InternVL2.5
 - Heuristic OCR lexical baseline adapter
@@ -92,8 +91,8 @@ To launch the full queue end to end:
 .venv/bin/python scripts/run_all_experiments.py
 ```
 
-The orchestration script performs prep, runs the configured `30` real-model screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
-For the current paper-facing interpretation, `24` of those screening runs form the canonical four-backbone benchmark and the additional `6` MiniGPT-4 runs are exploratory only.
+The orchestration script performs prep, runs the configured screening evaluations, promotes the planned `8` finalist reruns, runs the `12` Qwen LoRA jobs, and then runs the appendix evaluation set on the selected evaluation winner. Command logs and stage summaries are written under `outputs/logs/run_all/<timestamp>/`.
+For the current paper-facing interpretation, `24` screening runs form the canonical four-backbone benchmark. MiniGPT-4 artifacts are exploratory only and are not used in finalist promotion or paper-facing claims.
 Before launching the offline queue, it now proactively warms every committed HF repo into the local cache. Subprocesses then run in offline/local-cache mode, so cached models continue to run cleanly even if the network is unavailable during a long experiment campaign.
 
 To see a one-shot overall progress summary without digging through `outputs/` manually:
@@ -266,13 +265,7 @@ That report now includes:
 
 ### RunPod cost control
 
-For rented GPUs, treat the pod as a short-lived execution machine, not a permanent server:
-
-- store the repo, caches, checkpoints, and logs on the persistent `/workspace` volume
-- run the expensive GPU pod only while training is active
-- stop or terminate the pod after a phase finishes or when you are waiting on a decision
-- resume later from `checkpoint-*` without rerunning finished work
-- keep the launcher inside `tmux`, so you can detach during active training and still stop the pod promptly when a phase finishes
+For rented GPUs, keep the repo, caches, checkpoints, and logs on the persistent `/workspace` volume; run the pod only while training or post-train eval is active; and keep the launcher inside `tmux` so runs survive SSH disconnects and can resume from `checkpoint-*`.
 
 ### Appendix and stress runs
 
@@ -332,6 +325,8 @@ Each training run saves:
 ## Notes
 
 - The main fine-tuning path remains intentionally Qwen-first because it is the backbone with the cleanest and most mature LoRA path in this repo.
+- Paper-facing final claims are anchored on the official validation split. Internal-dev is question-disjoint from training but not fully image-disjoint, so it is used for screening, adapter diagnostics, and budget allocation rather than final evidence.
+- `Acc.` in paper tables is exact any-match after normalization; `Cons.` is the TextVQA-style consensus score `min(matches / 3, 1)`.
 - The current Apple Silicon tuning is empirical rather than theoretical: Qwen, BLIP-2, and LLaVA run most reliably at evaluation batch size `1`, while InternVL benefits from `2`.
 - The batch runner now wraps long subprocesses with `caffeinate` when available so the machine does not idle-sleep in the middle of long evaluation or training jobs.
 - LLaVA batching beyond `1` was re-checked on this machine against the real finalist prompt path and was not enabled, because it changed deterministic outputs relative to the single-sample baseline.

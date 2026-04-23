@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import json
 import math
+import random
+import re
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
@@ -30,6 +32,8 @@ TRAINED_EVAL_DIR = REPO_ROOT / "outputs" / "runs" / "trained_adapters" / "traine
 TRAINING_DIR = REPO_ROOT / "outputs" / "training"
 
 VAL_MANIFEST = REPO_ROOT / "data" / "cache" / "manifests" / "textvqa_validation.jsonl"
+INTERNAL_DEV_MANIFEST = REPO_ROOT / "data" / "cache" / "manifests" / "textvqa_internal_dev.jsonl"
+TRAIN_REMAINDER_MANIFEST = REPO_ROOT / "data" / "cache" / "manifests" / "textvqa_train_remainder.jsonl"
 
 BACKBONE_PREFIXES = {
     "qwen2-5-vl-3b-instruct": "Qwen2.5-VL-3B",
@@ -89,6 +93,30 @@ def ensure_dirs() -> None:
 def load_json(path: Path) -> dict:
     with path.open() as fh:
         return json.load(fh)
+
+
+def load_jsonl(path: Path) -> list[dict]:
+    with path.open() as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+def load_prediction_map(path: Path) -> dict[str, dict]:
+    return {str(record["sample_id"]): record for record in load_jsonl(path)}
+
+
+def image_id(record: dict) -> str | None:
+    metadata = record.get("metadata") or {}
+    return record.get("image_id") or metadata.get("image_id")
+
+
+def latex_escape(text: object) -> str:
+    return (
+        str(text)
+        .replace("\\", "\\textbackslash{}")
+        .replace("&", "\\&")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
 
 
 def normalize_text(text: str) -> str:
@@ -225,7 +253,7 @@ def trained_label(slug: str) -> str:
         "attn-r32-seed13": "Attention-only r32 (seed 13)",
         "best-assumed-ocr-off": "OCR ablation: off",
         "best-assumed-ocr-on": "OCR ablation: on",
-        "best-assumed-25pct": "Data scaling: 25 pct",
+        "best-assumed-25pct": "Data scaling: 25%",
         "best-assumed-full": "Data scaling: full",
     }
     return mapping[slug]
@@ -243,7 +271,7 @@ def trained_short_label(slug: str) -> str:
         "attn-r32-seed13": "Attn r32 s13",
         "best-assumed-ocr-off": "OCR off",
         "best-assumed-ocr-on": "OCR on",
-        "best-assumed-25pct": "Scale 25 pct",
+        "best-assumed-25pct": "Scale 25%",
         "best-assumed-full": "Scale full",
     }
     return mapping[slug]
@@ -335,15 +363,83 @@ def percentage(value: float | None) -> str:
     return "--" if value is None else f"{100 * value:.2f}"
 
 
+def percentage_ci(value: float, ci: dict[str, float]) -> str:
+    return f"{100 * value:.2f} [{100 * ci['lower']:.2f}, {100 * ci['upper']:.2f}]"
+
+
 def write_csv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
     with path.open("w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
 
 def write_text(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n")
+
+
+def sample_id_sort_key(sample_id: str) -> tuple[int, str]:
+    try:
+        return (0, f"{int(sample_id):012d}")
+    except ValueError:
+        return (1, sample_id)
+
+
+def paired_validation_statistics(finalist: EvalRow, tuned_val: dict[str, object]) -> dict[str, object]:
+    zero = load_prediction_map(finalist.path / "predictions.jsonl")
+    tuned = load_prediction_map(Path(tuned_val["path"]) / "predictions.jsonl")
+    common_ids = sorted(set(zero) & set(tuned), key=sample_id_sort_key)
+    diffs = [float(tuned[sample_id]["any_match"]) - float(zero[sample_id]["any_match"]) for sample_id in common_ids]
+
+    rng = random.Random(7)
+    boot: list[float] = []
+    n = len(diffs)
+    for _ in range(10000):
+        boot.append(sum(diffs[rng.randrange(n)] for _ in range(n)) / n)
+    boot.sort()
+
+    zero_correct_tuned_wrong = sum(
+        1
+        for sample_id in common_ids
+        if float(zero[sample_id]["any_match"]) == 1.0 and float(tuned[sample_id]["any_match"]) == 0.0
+    )
+    zero_wrong_tuned_correct = sum(
+        1
+        for sample_id in common_ids
+        if float(zero[sample_id]["any_match"]) == 0.0 and float(tuned[sample_id]["any_match"]) == 1.0
+    )
+    discordant = zero_correct_tuned_wrong + zero_wrong_tuned_correct
+    smaller = min(zero_correct_tuned_wrong, zero_wrong_tuned_correct)
+    mcnemar_p = min(
+        1.0,
+        2.0
+        * sum(
+            math.comb(discordant, idx) * (0.5**discordant)
+            for idx in range(smaller + 1)
+        ),
+    )
+    return {
+        "n": n,
+        "zero_accuracy": finalist.metrics["accuracy"],
+        "zero_accuracy_ci95": finalist.metrics["accuracy_ci95"],
+        "tuned_accuracy": tuned_val["metrics"]["accuracy"],
+        "tuned_accuracy_ci95": tuned_val["metrics"]["accuracy_ci95"],
+        "paired_gain": mean(diffs),
+        "paired_gain_ci95": {"lower": boot[250], "upper": boot[9750]},
+        "mcnemar_zero_correct_tuned_wrong": zero_correct_tuned_wrong,
+        "mcnemar_zero_wrong_tuned_correct": zero_wrong_tuned_correct,
+        "mcnemar_p": mcnemar_p,
+    }
+
+
+def question_prefix(question: str) -> str:
+    tokens = re.findall(r"[A-Za-z]+", question.lower())
+    if not tokens:
+        return "other"
+    prefix = tokens[0]
+    if prefix in {"what", "which", "who", "where", "when", "how", "why", "is", "are", "does", "do", "can"}:
+        return prefix
+    return "other"
 
 
 def build_screening_heatmap(screening: list[EvalRow]) -> None:
@@ -600,6 +696,141 @@ def build_qualitative_figure() -> None:
     plt.close(fig)
 
 
+def build_split_audit_table() -> None:
+    internal_dev = load_jsonl(INTERNAL_DEV_MANIFEST)
+    train_remainder = load_jsonl(TRAIN_REMAINDER_MANIFEST)
+    validation = load_jsonl(VAL_MANIFEST)
+
+    train_images = {image_id(record) for record in train_remainder if image_id(record)}
+    internal_images = {image_id(record) for record in internal_dev if image_id(record)}
+    overlapping_internal = [
+        record for record in internal_dev if image_id(record) in train_images
+    ]
+    nonoverlapping_internal = [
+        record for record in internal_dev if image_id(record) not in train_images
+    ]
+
+    rows = [
+        {
+            "pool": "Internal-dev",
+            "questions": len(internal_dev),
+            "images": len(internal_images),
+            "image_relation": f"{len(nonoverlapping_internal)} image-disjoint QA; {len(overlapping_internal)} image-overlap QA",
+            "role": "Screening/diagnostics",
+        },
+        {
+            "pool": "Train remainder",
+            "questions": len(train_remainder),
+            "images": len(train_images),
+            "image_relation": "Question-disjoint from internal-dev",
+            "role": "LoRA training pool",
+        },
+        {
+            "pool": "Official validation",
+            "questions": len(validation),
+            "images": len({image_id(record) for record in validation if image_id(record)}),
+            "image_relation": "Official held-out split",
+            "role": "Final paper-facing evaluation",
+        },
+    ]
+    write_csv(
+        DATA_DIR / "split_audit.csv",
+        rows,
+        ["pool", "questions", "images", "image_relation", "role"],
+    )
+    with (TABLES_DIR / "split_audit_table.tex").open("w") as fh:
+        fh.write("\\begin{tabular}{lrrp{0.31\\linewidth}p{0.22\\linewidth}}\n")
+        fh.write("\\toprule\n")
+        fh.write("Pool & QA & Images & Image relation & Role\\\\\n")
+        fh.write("\\midrule\n")
+        for row in rows:
+            fh.write(
+                f"{latex_escape(row['pool'])} & {row['questions']} & {row['images']} & "
+                f"{latex_escape(row['image_relation'])} & {latex_escape(row['role'])}\\\\\n"
+            )
+        fh.write("\\bottomrule\n")
+        fh.write("\\end{tabular}\n")
+
+
+def build_validation_support_tables(finalist: EvalRow, tuned_val: dict[str, object]) -> None:
+    stats = paired_validation_statistics(finalist, tuned_val)
+    write_text(DATA_DIR / "validation_significance.json", json.dumps(stats, indent=2))
+
+    with (TABLES_DIR / "validation_headline_table.tex").open("w") as fh:
+        fh.write("\\begin{tabular}{lccc}\n")
+        fh.write("\\toprule\n")
+        fh.write("System & Acc. [95\\% CI] & Cons. & Judge\\\\\n")
+        fh.write("\\midrule\n")
+        fh.write(
+            "Zero-shot Qwen finalist & "
+            f"{percentage_ci(finalist.metrics['accuracy'], finalist.metrics['accuracy_ci95'])} & "
+            f"{percentage(finalist.metrics['consensus_accuracy'])} & "
+            f"{percentage(maybe_load_judge_similarity(finalist.path))}\\\\\n"
+        )
+        fh.write(
+            "Tuned Qwen LoRA & "
+            f"{percentage_ci(tuned_val['metrics']['accuracy'], tuned_val['metrics']['accuracy_ci95'])} & "
+            f"{percentage(tuned_val['metrics']['consensus_accuracy'])} & "
+            f"{percentage(maybe_load_judge_similarity(Path(tuned_val['path'])))}\\\\\n"
+        )
+        fh.write("\\midrule\n")
+        gain_ci = stats["paired_gain_ci95"]
+        fh.write(
+            "Paired gain & "
+            f"{percentage(stats['paired_gain'])} [{percentage(gain_ci['lower'])}, {percentage(gain_ci['upper'])}] & "
+            "-- & --\\\\\n"
+        )
+        fh.write("\\bottomrule\n")
+        fh.write("\\end{tabular}\n")
+
+    zero_predictions = load_prediction_map(finalist.path / "predictions.jsonl")
+    tuned_predictions = load_prediction_map(Path(tuned_val["path"]) / "predictions.jsonl")
+    common_ids = sorted(set(zero_predictions) & set(tuned_predictions), key=sample_id_sort_key)
+    grouped: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for sample_id in common_ids:
+        prefix = question_prefix(str(zero_predictions[sample_id].get("question", "")))
+        grouped[prefix].append(
+            (
+                float(zero_predictions[sample_id].get("any_match", 0.0)),
+                float(tuned_predictions[sample_id].get("any_match", 0.0)),
+            )
+        )
+
+    rows = []
+    for prefix, values in grouped.items():
+        if len(values) < 50:
+            continue
+        zero_acc = mean(pair[0] for pair in values)
+        tuned_acc = mean(pair[1] for pair in values)
+        rows.append(
+            {
+                "prefix": prefix,
+                "count": len(values),
+                "zero_accuracy": zero_acc,
+                "tuned_accuracy": tuned_acc,
+                "gain": tuned_acc - zero_acc,
+            }
+        )
+    rows.sort(key=lambda row: row["count"], reverse=True)
+    write_csv(
+        DATA_DIR / "question_prefix_results.csv",
+        rows,
+        ["prefix", "count", "zero_accuracy", "tuned_accuracy", "gain"],
+    )
+    with (TABLES_DIR / "question_prefix_table.tex").open("w") as fh:
+        fh.write("\\begin{tabular}{lrrrr}\n")
+        fh.write("\\toprule\n")
+        fh.write("Question prefix & Count & Zero-shot & Tuned & Gain\\\\\n")
+        fh.write("\\midrule\n")
+        for row in rows:
+            fh.write(
+                f"{latex_escape(row['prefix'])} & {row['count']} & {percentage(row['zero_accuracy'])} & "
+                f"{percentage(row['tuned_accuracy'])} & {percentage(row['gain'])}\\\\\n"
+            )
+        fh.write("\\bottomrule\n")
+        fh.write("\\end{tabular}\n")
+
+
 def build_tables(
     screening: list[EvalRow],
     finalists: list[EvalRow],
@@ -621,6 +852,8 @@ def build_tables(
         if row.model == "Qwen2.5-VL-3B" and row.prompt == "short_answer"
     )
     tuned_val = next(row for row in trained if row["slug"] == "all-linear-r16-seed13" and row["split"] == "validation")
+    build_split_audit_table()
+    build_validation_support_tables(strongest_finalist, tuned_val)
 
     main_rows = []
     for row in screening_best:
@@ -686,7 +919,7 @@ def build_tables(
         for row in main_rows:
             label = f"{row['model']} ({row['setting']})"
             fh.write(
-                f"{row['stage']} & {label} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
+                f"{latex_escape(row['stage'])} & {latex_escape(label)} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
                 f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
@@ -721,7 +954,7 @@ def build_tables(
         fh.write("\\midrule\n")
         for row in trained_rows_csv:
             fh.write(
-                f"{row['group']} & {row['configuration']} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & "
+                f"{latex_escape(row['group'])} & {latex_escape(row['configuration'])} & {row['eval_loss']:.4f} & {percentage(row['accuracy'])} & "
                 f"{percentage(row['consensus_accuracy'])} & {percentage(row['f1'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
@@ -754,7 +987,7 @@ def build_tables(
         fh.write("\\midrule\n")
         for row in appendix_rows_csv:
             fh.write(
-                f"{row['branch']} & {row['setting']} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
+                f"{latex_escape(row['branch'])} & {latex_escape(row['setting'])} & {percentage(row['accuracy'])} & {percentage(row['consensus_accuracy'])} & "
                 f"{percentage(row['f1'])} & {percentage(row['bleu'])} & {percentage(row['meteor'])} & {percentage(row['rouge_l'])} & {percentage(row['judge'])}\\\\\n"
             )
         fh.write("\\bottomrule\n")
