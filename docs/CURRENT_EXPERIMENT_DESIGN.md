@@ -47,7 +47,7 @@ The canonical interpretation of the project is:
 
 The full experiment is easier to understand as a staged pipeline rather than a flat list of configs.
 
-![End-to-end TextVQA experiment pipeline](docs/figures/textvqa_experiment_pipeline.png)
+![End-to-end TextVQA experiment pipeline](figures/textvqa_experiment_pipeline.png)
 
 *Figure 1. End-to-end experiment pipeline for the current TextVQA study. The project follows a staged funnel: stratified internal-dev screening, finalist reruns on the official validation split, backbone selection for LoRA fine-tuning, an `8`-run core Qwen LoRA matrix, and `4` winner-conditioned follow-up training runs. The post-train evaluation stage is separate from the training-stage winner-selection logic: the training follow-ups are chosen by mean internal-dev `eval_loss` across core seeds, whereas completed trained adapters are later ranked by internal-dev accuracy before promoting only the final tuned model, or a very small shortlist, to validation. Appendix robustness runs remain a secondary validation branch that supports the final analysis without altering the main winner-selection funnel.*
 
