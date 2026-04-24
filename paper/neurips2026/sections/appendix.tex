@@ -1,0 +1,50 @@
+\section{Reproducibility Details}
+\label{app:reproducibility}
+
+This appendix records the prompt and metric details needed to reproduce the reported runs from the paper alone. All templates use the same system message: \texttt{You are answering TextVQA questions. Return a short final answer only, with no explanation.} The placeholders \texttt{\{question\}}, \texttt{\{ocr\_tokens\}}, and \texttt{\{question\_type\}} are filled from the manifest and prompt builder at run time.
+
+\begin{center}
+    \centering
+    \scriptsize
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{>{\raggedright\arraybackslash}p{0.16\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}p{0.56\textwidth}}
+        \toprule
+        Template & OCR setting & User prompt skeleton \\
+        \midrule
+        \texttt{plain} & no OCR & \texttt{Question: \{question\}} \newline \texttt{Answer:} \\
+        \texttt{short\_answer} & no OCR & \texttt{Question: \{question\}} \newline \texttt{Reply with the shortest exact answer string that best matches the image.} \newline \texttt{Answer:} \\
+        \texttt{ocr\_copy\_first} & no explicit OCR field & \texttt{Question: \{question\}} \newline \texttt{If the answer appears as visible text in the image, copy it exactly.} \newline \texttt{Answer:} \\
+        \texttt{ocr\_injected} & dataset OCR, capped at 32 tokens unless otherwise noted & \texttt{Question: \{question\}} \newline \texttt{OCR tokens: \{ocr\_tokens\}} \newline \texttt{Answer:} \\
+        \texttt{ocr\_injected\_}\newline\texttt{normalized} & normalized dataset OCR, capped at 32 tokens unless otherwise noted & \texttt{Question: \{question\}} \newline \texttt{OCR tokens: \{ocr\_tokens\}} \newline \texttt{If OCR text nearly matches the answer, normalize only casing or punctuation when needed.} \newline \texttt{Answer:} \\
+        \texttt{ocr\_fused} & dataset OCR fused with external OCR, capped at 32 tokens & \texttt{Question: \{question\}} \newline \texttt{Fused OCR tokens: \{ocr\_tokens\}} \newline \texttt{Answer:} \\
+        \texttt{answer\_format\_}\newline\texttt{constrained} & normalized dataset OCR, capped at 32 tokens & \texttt{Question: \{question\}} \newline \texttt{OCR tokens: \{ocr\_tokens\}} \newline \texttt{Return only the final answer string. Use digits for numbers and preserve visible text when exact copying is appropriate.} \newline \texttt{Answer:} \\
+        \texttt{question\_routed} & normalized dataset OCR, capped at 32 tokens & \texttt{Question type: \{question\_type\}} \newline \texttt{Question: \{question\}} \newline \texttt{If this is a yes/no question, answer only yes or no. If it is numeric, answer with digits only. Otherwise return the shortest exact answer string.} \newline \texttt{OCR tokens: \{ocr\_tokens\}} \newline \texttt{Answer:} \\
+        \bottomrule
+    \end{tabular}
+    \par\smallskip
+    \raggedright
+    \textbf{Table A1:} Exact prompt templates used by the screening, finalist, training, and appendix runs reported in the paper. Stress runs reuse \texttt{ocr\_injected\_normalized} while varying the generation cap or OCR-token cap.
+\end{center}
+
+\begin{center}
+    \centering
+    \scriptsize
+    \setlength{\tabcolsep}{4pt}
+    \raggedright
+    \textbf{Table A2:} Evaluation metrics and their roles. Exact any-match accuracy is the primary paper-facing metric; all other metrics are diagnostic checks that help interpret formatting, partial-answer quality, or semantic equivalence.
+    \par\smallskip
+    \begin{tabular}{>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.54\textwidth}>{\raggedright\arraybackslash}p{0.19\textwidth}}
+        \toprule
+        Metric & Definition & Role in paper \\
+        \midrule
+        Exact any-match accuracy & A prediction receives credit if its normalized string exactly matches at least one of the ten normalized human answers. & Primary selection and headline metric \\
+        Consensus accuracy & $\min(m/3, 1)$, where $m$ is the number of normalized human answers matching the normalized prediction. & Secondary TextVQA-style agreement score \\
+        Token F1 / precision / recall & Token-overlap scores between the normalized prediction and the selected normalized reference answer. & Partial-answer diagnostic \\
+        BLEU & Corpus n-gram precision with brevity penalty. & Reported for completeness; not used for model selection \\
+        METEOR & Harmonic mean of unigram precision and recall with stemming-aware matching. & Secondary lexical-semantic diagnostic \\
+        ROUGE-L & Longest-common-subsequence overlap between prediction and reference. & Secondary overlap diagnostic \\
+        LLM-as-a-Judge & GPT-4.1 mini assigns each prediction a semantic score in $\{0, 0.5, 1\}$ against the question and all references. & Semantic diagnostic only \\
+        Paired bootstrap and McNemar test & Resampling and paired-disagreement tests over the same 5,000 validation examples. & Uncertainty and significance checks for the headline gain \\
+        \bottomrule
+    \end{tabular}
+\end{center}
